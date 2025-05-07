@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sld>
+  <accelerator name="test" desc="Accelerator TEST" data_size="4" device_id="88" hls_tool="rtl">
+    <param name="reg0" desc="reg0" />
+    <param name="reg1" desc="reg1" />
+  </accelerator>
+</sld>
