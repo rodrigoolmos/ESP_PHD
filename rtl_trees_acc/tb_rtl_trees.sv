@@ -1,0 +1,149 @@
+`include "agent_acc_esp.sv"
+`timescale 1us/1ns
+
+module tb_rtl_trees;
+    
+    const integer t_clk    = 10;    // Clock period 100MHz
+
+
+    parameter N_NODES = 256;
+    parameter N_TREES = 128;
+
+    parameter N_SAMPLES = 10000;
+    parameter COLUMNAS = 33;
+  
+    bit [63:0] trees        [N_TREES-1:0][N_NODES-1:0];
+    bit [31:0] features_mem [N_SAMPLES-1:0][31:0];
+    bit [31:0] labels_mem   [N_SAMPLES-1:0];
+    bit [31:0] predictions  [N_SAMPLES-1:0];
+
+    bit error_acc;
+
+    esp_acc_if esp_acc_if_inst();
+
+    agent_esp_acc agent_esp_acc_inst;
+
+    rtl_trees rtl_trees_inst(
+        .clk(esp_acc_if_inst.clk),
+        .rst_n(esp_acc_if_inst.rst),
+        .conf_info_reg0(esp_acc_if_inst.conf_info_reg0),
+        .conf_info_reg1(esp_acc_if_inst.conf_info_reg1),
+        .conf_done(esp_acc_if_inst.conf_done),
+        .acc_done(esp_acc_if_inst.acc_done),
+        .debug(esp_acc_if_inst.debug),
+        .dma_read_ctrl_ready(esp_acc_if_inst.dma_read_ctrl_ready),
+        .dma_read_ctrl_valid(esp_acc_if_inst.dma_read_ctrl_valid),
+        .dma_read_ctrl_data_index(esp_acc_if_inst.dma_read_ctrl_data_index),
+        .dma_read_ctrl_data_length(esp_acc_if_inst.dma_read_ctrl_data_length),
+        .dma_read_ctrl_data_size(esp_acc_if_inst.dma_read_ctrl_data_size),
+        .dma_read_ctrl_data_user(esp_acc_if_inst.dma_read_ctrl_data_user),
+        .dma_read_chnl_ready(esp_acc_if_inst.dma_read_chnl_ready),
+        .dma_read_chnl_valid(esp_acc_if_inst.dma_read_chnl_valid),
+        .dma_read_chnl_data(esp_acc_if_inst.dma_read_chnl_data),
+        .dma_write_ctrl_ready(esp_acc_if_inst.dma_write_ctrl_ready),
+        .dma_write_ctrl_valid(esp_acc_if_inst.dma_write_ctrl_valid),
+        .dma_write_ctrl_data_index(esp_acc_if_inst.dma_write_ctrl_data_index),
+        .dma_write_ctrl_data_length(esp_acc_if_inst.dma_write_ctrl_data_length),
+        .dma_write_ctrl_data_size(esp_acc_if_inst.dma_write_ctrl_data_size),
+        .dma_write_ctrl_data_user(esp_acc_if_inst.dma_write_ctrl_data_user),
+        .dma_write_chnl_ready(esp_acc_if_inst.dma_write_chnl_ready),
+        .dma_write_chnl_valid(esp_acc_if_inst.dma_write_chnl_valid),
+        .dma_write_chnl_data(esp_acc_if_inst.dma_write_chnl_data)
+    );
+
+    task automatic read_trees(
+        input string nombre_archivo,
+        output bit [63:0] datos [0:N_TREES-1][0:N_NODES-1]
+      );
+        integer file, status;
+        begin
+          file = $fopen(nombre_archivo, "r");
+          if (file == 0) begin
+            $display("ERROR: No se pudo abrir el archivo: %s", nombre_archivo);
+            $finish;
+          end
+    
+          for (int i = 0; i < N_TREES; i++) begin
+            for (int j = 0; j < N_NODES; j++) begin
+              status = $fscanf(file, "0x%h ", datos[i][j]);
+              if (status != 1) begin
+                $display("ERROR: Lectura fallida en [%0d][%0d]", i, j);
+                $fclose(file);
+                $finish;
+              end
+            end
+          end
+          $fclose(file);
+        end
+    endtask
+
+    task read_features(
+        input  string nombre_archivo,
+        output bit [31:0] features [0:N_SAMPLES-1][0:31], // 32 columnas
+        output bit [31:0] labels   [0:N_SAMPLES-1]        // última columna
+    );
+        integer file, status;
+        shortreal temp_float;
+        int temp_int;
+
+        file = $fopen(nombre_archivo, "r");
+        if (file == 0) begin
+        $display("ERROR: No se pudo abrir el archivo: %s", nombre_archivo);
+        $finish;
+        end
+
+        for (int i = 0; i < N_SAMPLES; i++) begin
+            for (int j = 0; j < 32; j++) begin
+                status = $fscanf(file, "%f ", temp_float); // ← %f + shortreal
+                if (status != 1) begin
+                    $display("ERROR leyendo feature[%0d][%0d]", i, j);
+                    $finish;
+                end
+                features[i][j] = $shortrealtobits(temp_float); // ← binario exacto
+            end
+            
+            // Leer la etiqueta como entero (si es 0 o 1, por ejemplo)
+            status = $fscanf(file, "%d\n", temp_int);
+            if (status != 1) begin
+                $display("ERROR leyendo label[%0d]", i);
+                $finish;
+            end
+            labels[i] = temp_int;
+        end
+
+        $fclose(file);
+    endtask
+
+    initial begin
+        esp_acc_if_inst.clk = 0;
+        forever #(t_clk/2) esp_acc_if_inst.clk = 
+                    ~esp_acc_if_inst.clk;
+    end
+
+    initial begin
+        agent_esp_acc_inst = new(esp_acc_if_inst);
+        esp_acc_if_inst.rst = 0;
+        #100 @(posedge esp_acc_if_inst.clk);
+        esp_acc_if_inst.rst = 1;
+        @(posedge esp_acc_if_inst.clk);
+    end
+
+    initial begin
+        @(posedge esp_acc_if_inst.rst);
+
+        // Read the trees and features from files
+        read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
+        read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem, labels_mem);
+
+        agent_esp_acc_inst.gold_gen(
+            trees,
+            features_mem,
+            labels_mem,
+            predictions
+        );
+
+        $finish;
+
+    end
+
+endmodule
