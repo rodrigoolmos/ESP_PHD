@@ -10,6 +10,8 @@ module tb_general_acc_esp;
     bit[63:0] gold[16];
     bit[63:0] result_acc[];
 
+    bit error_acc;
+
     esp_acc_if esp_acc_if_inst();
 
     agent_esp_acc agent_esp_acc_inst;
@@ -64,7 +66,9 @@ module tb_general_acc_esp;
         agent_esp_acc_inst.run(0, 16);
         agent_esp_acc_inst.collect_memory(0, 16, result_acc);
         agent_esp_acc_inst.gold_gen(vec_a, vec_b, gold);
-        agent_esp_acc_inst.validate_acc(result_acc, gold, 16);
+        error_acc = agent_esp_acc_inst.validate_acc(result_acc, gold, 16);
+        assert (!error_acc)
+            else $error("Error: Validation failed!");
 
 
         agent_esp_acc_inst.load_memory(0, 16, vec_a);
@@ -72,7 +76,9 @@ module tb_general_acc_esp;
         agent_esp_acc_inst.run(0, 16);
         agent_esp_acc_inst.collect_memory(0, 16, result_acc);
         agent_esp_acc_inst.gold_gen(vec_a, vec_b, gold);
-        agent_esp_acc_inst.validate_acc(result_acc, gold, 16);
+        error_acc = agent_esp_acc_inst.validate_acc(result_acc, gold, 16);
+        assert (!error_acc)
+            else $error("Error: Validation failed!");
 
         $finish;
 

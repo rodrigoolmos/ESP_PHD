@@ -143,7 +143,6 @@ class agent_esp_acc;
             end
         end
         return 0;
-        
     endfunction
 
     // Generate a gold standard for the expected output
