@@ -53,7 +53,7 @@ module tb_rtl_trees;
 
     task automatic read_trees(
         input string nombre_archivo,
-        output bit [63:0] datos [0:N_TREES-1][0:N_NODES-1]
+        output bit [63:0] datos [N_TREES-1:0][N_NODES-1:0]
       );
         integer file, status;
         begin
@@ -79,8 +79,8 @@ module tb_rtl_trees;
 
     task read_features(
         input  string nombre_archivo,
-        output bit [31:0] features [0:N_SAMPLES-1][0:31], // 32 columnas
-        output bit [31:0] labels   [0:N_SAMPLES-1]        // última columna
+        output bit [31:0] features [N_SAMPLES-1:0][31:0], // 32 columnas
+        output bit [31:0] labels   [N_SAMPLES-1:0]        // última columna
     );
         integer file, status;
         shortreal temp_float;

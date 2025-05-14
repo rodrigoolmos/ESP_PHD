@@ -147,10 +147,10 @@ class agent_esp_acc;
     endfunction
 
     // Generate a gold standard for the expected output
-    task gold_gen(input bit[63:0] trees [127:0][255:0], 
-                    input bit [31:0] features[10000][32], 
-                    input bit [31:0] labels[10000], 
-                    ref   bit [31:0] predictions[10000]);
+    task automatic gold_gen(input bit[63:0] trees [127:0][255:0], 
+                            input bit [31:0] features[9999:0][31:0], 
+                            input bit [31:0] labels[9999:0], 
+                            ref   bit [31:0] predictions[9999:0]);
 
         logic[31:0] sum = 0;
         logic[31:0] leaf_value;
@@ -176,21 +176,21 @@ class agent_esp_acc;
     
                 while(1) begin
                     node = trees[t][node_index];
-                    feature_index = node[55:48];
-                    threshold = node[31:0];
+                    feature_index = node[15:8];
+                    threshold = node[63:32];
                     node_left = node_index + 1;
-                    node_right = node[47:40];
+                    node_right = node[23:16];
 
                     feature = features[p][feature_index];
     
                     node_index = feature < threshold ? 
                                             node_left : node_right;
     
-                    if (!(node[56]))
+                    if (!(node[0]))
                         break;
                 end
     
-                leaf_value = node[31:0];
+                leaf_value = node[63:32];
                 if (leaf_value >= 0 && leaf_value < 32)
                     counts[leaf_value]++;
     
