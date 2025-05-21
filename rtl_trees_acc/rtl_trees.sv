@@ -1,12 +1,17 @@
 `timescale 1us/1ns
 
-module rtl_trees (
+module rtl_trees #(
+    parameter integer MAX_SAMPLES    = 10000,                  // Number max features samples
+    parameter integer N_TREES         = 128,                   // Number of trees in the forest
+    parameter integer TREES_LEN       = 256                    // Tree length (number of nodes)
+) (
     input  logic        clk,
     input  logic        rst_n,                         // Active-low reset
 
     // Configuration
-    input  logic [31:0] conf_info_reg0,                 // Read data index
-    input  logic [31:0] conf_info_reg1,                 // Read data length
+    input  logic [31:0] LOAD_TREES,                     // FLAG: load trees
+    input  logic [31:0] N_FEATURES,                     // Read data length
+    input  logic [31:0] N_SAMPLES,                     // Read data length
     input  logic        conf_done,                      // One-cycle pulse: config valid
 
     // Accelerator status
@@ -40,10 +45,8 @@ module rtl_trees (
     output logic [63:0] dma_write_chnl_data             // Outgoing beat
 );
 
-  localparam integer READ_LEN   = 32;                   // Number of beats to read
-  localparam integer WRITE_LEN  = 16;                   // Number of beats to write
-  localparam int UNROLL         = 16;                    // Unrolling factor
-  localparam int N_CHUNKS       = READ_LEN / UNROLL;    // Number of chunks to compute
+  localparam integer TREES_LEN_BITS  = $clog2(TREES_LEN);    // Number of bits to address a tree
+
 
 
   // State machine encoding
@@ -55,14 +58,14 @@ module rtl_trees (
     DONE      = 4
   } state_e;
 
-  state_e           state;
-  logic [63:0]      vec_a     [0:15];
-  logic [63:0]      vec_b     [0:15];
-  logic [63:0]      vec_c     [0:15];
-  logic [31:0]      rd_ptr, wr_ptr;
-  logic             end_compute;
-  // índice interno
-  logic [$clog2(N_CHUNKS):0] chunk_idx;
+  state_e                         state;
+  logic [63:0]                    trees[N_TREES-1:0][TREES_LEN-1:0];    // Trees data
+  logic [31:0]                    features[MAX_SAMPLES-1:0];            // Features data
+  logic [31:0]                    predictions[MAX_SAMPLES-1:0];         // Predictions data
+  logic [31:0]                    rd_ptr, wr_ptr;
+  logic [TREES_LEN_BITS-1:0]      address_node;
+  logic [31-TREES_LEN_BITS:0]     address_tree;
+  logic                           end_compute;
 
   // Expose state in upper bits of debug
   assign debug = {29'd0, state};
@@ -85,7 +88,10 @@ module rtl_trees (
           if (conf_done) begin
             dma_read_ctrl_valid       <= 1;
             dma_read_ctrl_data_index  <= 0;
-            dma_read_ctrl_data_length <= READ_LEN;
+            if (LOAD_TREES[0])
+              dma_read_ctrl_data_length <= N_TREES*TREES_LEN;
+            else
+              dma_read_ctrl_data_length <= N_SAMPLES*N_FEATURES;
             dma_read_ctrl_data_size   <= 3'b011;
             dma_read_ctrl_data_user   <= 0;
             dma_read_chnl_ready       <= 1;
@@ -99,14 +105,19 @@ module rtl_trees (
 
           if (dma_read_chnl_valid && dma_read_chnl_ready) begin
 
-            // First half of the data
-            if (wr_ptr < READ_LEN / 2)
-              vec_a[wr_ptr] <= dma_read_chnl_data;
-            // Second half of the data
-            else
-              vec_b[wr_ptr - READ_LEN / 2] <= dma_read_chnl_data;
+            // Load trees data
+            if (LOAD_TREES[0]) begin
+              trees[address_tree][address_node] <= dma_read_chnl_data;
+              wr_ptr       <= wr_ptr + 1;
+            end
+            // Load features data
+            else begin
+              features[wr_ptr+0] <= dma_read_chnl_data[31:0];
+              features[wr_ptr+1] <= dma_read_chnl_data[63:32];
+              wr_ptr       <= wr_ptr + 2;
+            end
+            
 
-            wr_ptr       <= wr_ptr + 1;
             if (wr_ptr == dma_read_ctrl_data_length-1) begin
               dma_read_chnl_ready <= 0;
               wr_ptr              <= 0;
@@ -119,7 +130,7 @@ module rtl_trees (
           if (end_compute == 1) begin
             dma_write_ctrl_valid       <= 1;
             dma_write_ctrl_data_index  <= 0;
-            dma_write_ctrl_data_length <= WRITE_LEN;
+            dma_write_ctrl_data_length <= N_SAMPLES;
             dma_write_ctrl_data_size   <= 3'b011;
             dma_write_ctrl_data_user   <= 0;
             state                      <= DMA_WRITE;
@@ -153,29 +164,22 @@ module rtl_trees (
   // Compute the result use example "SUMA DE DOS VECTORES LOOP UNROLLING (UNROLL)"
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      chunk_idx   <= 0;
       end_compute <= 0;
     end else begin
       if (state == COMPUTE) begin
-        if (chunk_idx < N_CHUNKS) begin
-          for (int u = 0; u < UNROLL; u++) begin
-            vec_c[chunk_idx*UNROLL + u] <= 
-              vec_a[chunk_idx*UNROLL + u] + vec_b[chunk_idx*UNROLL + u];
-          end
-          chunk_idx   <= chunk_idx + 1;
-          end_compute <= 0;
-        end else begin
-          end_compute <= 1;
-          chunk_idx   <= 0;
-        end
+
       end else begin
         end_compute <= 0;
-        chunk_idx   <= 0;
       end
     end
   end
 
-  always_comb dma_write_chnl_data  = vec_c[rd_ptr];
+  always_comb dma_write_chnl_data  = predictions[rd_ptr];
+
+  always_comb begin
+    address_node = wr_ptr[TREES_LEN_BITS-1:0];
+    address_tree = wr_ptr[31:TREES_LEN_BITS];
+  end
 
 
 endmodule

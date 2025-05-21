@@ -6,16 +6,16 @@ module tb_rtl_trees;
     const integer t_clk    = 10;    // Clock period 100MHz
 
 
-    parameter N_NODES = 256;
-    parameter N_TREES = 128;
+    parameter N_NODES = 256;        // Number of nodes in each tree
+    parameter N_TREES = 128;        // Number of trees in the forest
 
-    parameter N_SAMPLES = 10000;
-    parameter COLUMNAS = 33;
+    parameter N_SAMPLES = 10000;    // Number of samples
+    parameter COLUMNAS = 33;        // 32 features + 1 label
   
-    bit [63:0] trees        [N_TREES-1:0][N_NODES-1:0];
-    bit [31:0] features_mem [N_SAMPLES-1:0][31:0];
-    bit [31:0] labels_mem   [N_SAMPLES-1:0];
-    bit [31:0] predictions  [N_SAMPLES-1:0];
+    bit [63:0] trees            [N_TREES*N_NODES-1:0];
+    bit [63:0] features_mem_64  [N_SAMPLES*COLUMNAS-2:0];
+    bit [31:0] labels_mem       [N_SAMPLES-1:0];
+    bit [31:0] predictions      [N_SAMPLES-1:0];
 
     bit error_acc;
 
@@ -23,11 +23,16 @@ module tb_rtl_trees;
 
     agent_esp_acc agent_esp_acc_inst;
 
-    rtl_trees rtl_trees_inst(
+    rtl_trees #(
+        .MAX_SAMPLES(N_SAMPLES),
+        .N_TREES(N_TREES),
+        .TREES_LEN(N_NODES)
+    )rtl_trees_inst(
         .clk(esp_acc_if_inst.clk),
         .rst_n(esp_acc_if_inst.rst),
-        .conf_info_reg0(esp_acc_if_inst.conf_info_reg0),
-        .conf_info_reg1(esp_acc_if_inst.conf_info_reg1),
+        .LOAD_TREES(LOAD_TREES),
+        .N_FEATURES(N_FEATURES),
+        .N_SAMPLES(N_SAMPLES),
         .conf_done(esp_acc_if_inst.conf_done),
         .acc_done(esp_acc_if_inst.acc_done),
         .debug(esp_acc_if_inst.debug),
@@ -53,7 +58,7 @@ module tb_rtl_trees;
 
     task automatic read_trees(
         input string nombre_archivo,
-        output bit [63:0] datos [N_TREES-1:0][N_NODES-1:0]
+        output bit [63:0] datos [N_TREES*N_NODES-1:0]
       );
         integer file, status;
         begin
@@ -65,7 +70,7 @@ module tb_rtl_trees;
     
           for (int i = 0; i < N_TREES; i++) begin
             for (int j = 0; j < N_NODES; j++) begin
-              status = $fscanf(file, "0x%h ", datos[i][j]);
+              status = $fscanf(file, "0x%h ", datos[i*N_NODES+j]);
               if (status != 1) begin
                 $display("ERROR: Lectura fallida en [%0d][%0d]", i, j);
                 $fclose(file);
@@ -79,12 +84,15 @@ module tb_rtl_trees;
 
     task read_features(
         input  string nombre_archivo,
-        output bit [31:0] features [N_SAMPLES-1:0][31:0], // 32 columnas
-        output bit [31:0] labels   [N_SAMPLES-1:0]        // última columna
+        output bit [63:0] features [N_SAMPLES*COLUMNAS-2:0],    // 32 columnas
+        output bit [31:0] labels   [N_SAMPLES-1:0]              // última columna
     );
         integer file, status;
-        shortreal temp_float;
+        shortreal temp_float_l;
+        shortreal temp_float_h;
         int temp_int;
+        bit [31:0] temp_float_32_l;
+        bit [31:0] temp_float_32_h;
 
         file = $fopen(nombre_archivo, "r");
         if (file == 0) begin
@@ -93,13 +101,20 @@ module tb_rtl_trees;
         end
 
         for (int i = 0; i < N_SAMPLES; i++) begin
-            for (int j = 0; j < 32; j++) begin
-                status = $fscanf(file, "%f ", temp_float); // ← %f + shortreal
+            for (int j = 0; j < (COLUMNAS-1)/2; j++) begin
+                status = $fscanf(file, "%f ", temp_float_l); // ← %f + shortreal
+                if (status != 1) begin
+                    $display("ERROR leyendo feature[%0d][%0d]", i, j);
+                    $finish;
+                end               
+                status = $fscanf(file, "%f ", temp_float_h); // ← %f + shortreal
                 if (status != 1) begin
                     $display("ERROR leyendo feature[%0d][%0d]", i, j);
                     $finish;
                 end
-                features[i][j] = $shortrealtobits(temp_float); // ← binario exacto
+                temp_float_32_l = $shortrealtobits(temp_float_l); // ← binario exacto
+                temp_float_32_h = $shortrealtobits(temp_float_h); // ← binario exacto
+                features[i*(COLUMNAS-1)/2 + j] = {temp_float_32_h, temp_float_32_l}; // ← 64 bits
             end
             
             // Leer la etiqueta como entero (si es 0 o 1, por ejemplo)
@@ -133,14 +148,19 @@ module tb_rtl_trees;
 
         // Read the trees and features from files
         read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
-        read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem, labels_mem);
-
+        read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem_64, labels_mem);
         agent_esp_acc_inst.gold_gen(
             trees,
-            features_mem,
+            COLUMNAS-1,
+            features_mem_64,
             labels_mem,
             predictions
         );
+
+        // Load the trees into the RTL module
+        // agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, trees);
+        // Load the features into the RTL module
+        // agent_esp_acc_inst.load_memory(0, N_SAMPLES*32, features_mem_64);
 
         $finish;
 

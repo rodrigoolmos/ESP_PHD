@@ -43,6 +43,12 @@ endinterface
 
 class agent_esp_acc;
 
+    parameter N_NODES = 256;        // Number of nodes in each tree
+    parameter N_TREES = 128;        // Number of trees in the forest
+
+    parameter N_SAMPLES = 10000;    // Number of samples
+    parameter COLUMNAS = 33;        // 32 features + 1 label
+
     // Virtual interface to the DUT (ESP accelerator)
     virtual esp_acc_if esp_if;
 
@@ -147,9 +153,10 @@ class agent_esp_acc;
     endfunction
 
     // Generate a gold standard for the expected output
-    task automatic gold_gen(input bit[63:0] trees [127:0][255:0], 
-                            input bit [31:0] features[9999:0][31:0], 
-                            input bit [31:0] labels[9999:0], 
+    task automatic gold_gen(input bit[63:0] trees [N_NODES*N_TREES-1:0], 
+                            input integer n_features, 
+                            input bit [63:0] features[N_SAMPLES*COLUMNAS-2:0], 
+                            input bit [31:0] labels[N_SAMPLES-1:0], 
                             ref   bit [31:0] predictions[9999:0]);
 
         logic[31:0] sum = 0;
@@ -163,7 +170,8 @@ class agent_esp_acc;
         logic[63:0] node;
         logic[31:0] best;
         logic[31:0] best_count;
-        logic[31:0] feature;
+        logic[31:0] feature_h;
+        logic[31:0] feature_l;
 
         integer correct = 0;
 
@@ -171,20 +179,25 @@ class agent_esp_acc;
             for (int c=0; c<32; ++c)
                 counts[c] = 0;
 
-                for (int t = 0; t < 128; t++) begin
+                for (int t = 0; t < N_TREES; t++) begin
                 node_index = 0;
     
                 while(1) begin
-                    node = trees[t][node_index];
+                    node = trees[t*N_NODES+node_index];
                     feature_index = node[15:8];
                     threshold = node[63:32];
                     node_left = node_index + 1;
                     node_right = node[23:16];
-
-                    feature = features[p][feature_index];
-    
-                    node_index = feature < threshold ? 
-                                            node_left : node_right;
+                    
+                    {feature_h, feature_l} = features[p*n_features/2+feature_index/2];
+                    
+                    if (feature_index%2) begin
+                        node_index = feature_h < threshold ? 
+                                                node_left : node_right;
+                    end else begin
+                        node_index = feature_l < threshold ? 
+                                                node_left : node_right;
+                    end
     
                     if (!(node[0]))
                         break;
