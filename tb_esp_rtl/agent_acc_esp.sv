@@ -114,6 +114,7 @@ class agent_esp_acc;
 
         // WRITE CONTROL: handshake
         esp_if.dma_write_ctrl_ready = 1;
+        @(posedge esp_if.clk);
         wait (esp_if.dma_write_ctrl_valid && esp_if.dma_write_ctrl_ready);
         write_index  = esp_if.dma_write_ctrl_data_index;
         write_length = esp_if.dma_write_ctrl_data_length;
