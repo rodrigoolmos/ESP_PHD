@@ -1,17 +1,18 @@
 `timescale 1us/1ns
 
 module rtl_trees #(
-    parameter integer MAX_SAMPLES    = 10000,                  // Number max features samples
-    parameter integer N_TREES         = 128,                   // Number of trees in the forest
-    parameter integer TREES_LEN       = 256                    // Tree length (number of nodes)
+    parameter integer MAX_SAMPLES           = 10000,                 // Number max features samples
+    parameter integer N_FEATURES_SAMPLE     = 32,                    // Number max features samples
+    parameter integer N_TREES               = 128,                   // Number of trees in the forest
+    parameter integer TREES_LEN             = 256                    // Tree length (number of nodes)
 ) (
     input  logic        clk,
-    input  logic        rst_n,                         // Active-low reset
+    input  logic        rst_n,                          // Active-low reset
 
     // Configuration
-    input  logic [31:0] LOAD_TREES,                     // FLAG: load trees
-    input  logic [31:0] N_FEATURES,                     // Read data length
-    input  logic [31:0] N_SAMPLES,                     // Read data length
+    input  logic [31:0] load_trees,                     // FLAG: load trees
+    input  logic [31:0] n_features,                     // Number of features
+    input  logic [31:0] n_samples,                      // Number of samples
     input  logic        conf_done,                      // One-cycle pulse: config valid
 
     // Accelerator status
@@ -59,13 +60,15 @@ module rtl_trees #(
   } state_e;
 
   state_e                         state;
-  logic [63:0]                    trees[N_TREES-1:0][TREES_LEN-1:0];    // Trees data
-  logic [31:0]                    features[MAX_SAMPLES-1:0];            // Features data
-  logic [31:0]                    predictions[MAX_SAMPLES-1:0];         // Predictions data
+  logic [63:0]                    trees[N_TREES-1:0][TREES_LEN-1:0];                      // Trees data
+  logic [31:0]                    features[N_FEATURES_SAMPLE*MAX_SAMPLES-1:0];            // Features data
+  logic [31:0]                    predictions[MAX_SAMPLES-1:0];                           // Predictions data
   logic [31:0]                    rd_ptr, wr_ptr;
   logic [TREES_LEN_BITS-1:0]      address_node;
   logic [31-TREES_LEN_BITS:0]     address_tree;
   logic                           end_compute;
+
+  logic [63:0]                    cnt_test;
 
   // Expose state in upper bits of debug
   assign debug = {29'd0, state};
@@ -88,10 +91,12 @@ module rtl_trees #(
           if (conf_done) begin
             dma_read_ctrl_valid       <= 1;
             dma_read_ctrl_data_index  <= 0;
-            if (LOAD_TREES[0])
+            if (load_trees[0])
               dma_read_ctrl_data_length <= N_TREES*TREES_LEN;
-            else
-              dma_read_ctrl_data_length <= N_SAMPLES*N_FEATURES;
+            else begin
+              // 2 beats of 64 bits means 2 features per CLK
+              dma_read_ctrl_data_length <= n_samples*n_features/2; 
+            end
             dma_read_ctrl_data_size   <= 3'b011;
             dma_read_ctrl_data_user   <= 0;
             dma_read_chnl_ready       <= 1;
@@ -106,48 +111,65 @@ module rtl_trees #(
           if (dma_read_chnl_valid && dma_read_chnl_ready) begin
 
             // Load trees data
-            if (LOAD_TREES[0]) begin
+            if (load_trees[0]) begin
               trees[address_tree][address_node] <= dma_read_chnl_data;
-              wr_ptr       <= wr_ptr + 1;
-            end
+              rd_ptr       <= rd_ptr + 1;
+
+              if (rd_ptr == dma_read_ctrl_data_length-1) begin
+                dma_read_chnl_ready <= 0;
+                rd_ptr              <= 0;
+                state               <= COMPUTE;
+              end
             // Load features data
-            else begin
-              features[wr_ptr+0] <= dma_read_chnl_data[31:0];
-              features[wr_ptr+1] <= dma_read_chnl_data[63:32];
-              wr_ptr       <= wr_ptr + 2;
+            end else begin
+              features[rd_ptr+0] <= dma_read_chnl_data[31:0];
+              features[rd_ptr+1] <= dma_read_chnl_data[63:32];
+              rd_ptr       <= rd_ptr + 2;
+
+              if (rd_ptr == n_samples*n_features-2) begin
+                dma_read_chnl_ready <= 0;
+                rd_ptr              <= 0;
+                state               <= COMPUTE;
+              end
             end
             
 
-            if (wr_ptr == dma_read_ctrl_data_length-1) begin
-              dma_read_chnl_ready <= 0;
-              wr_ptr              <= 0;
-              state               <= COMPUTE;
-            end
           end
         end
 
         COMPUTE: begin
-          if (end_compute == 1) begin
+          if (load_trees[0]) begin
             dma_write_ctrl_valid       <= 1;
             dma_write_ctrl_data_index  <= 0;
-            dma_write_ctrl_data_length <= N_SAMPLES;
+            dma_write_ctrl_data_length <= 1;
             dma_write_ctrl_data_size   <= 3'b011;
             dma_write_ctrl_data_user   <= 0;
             state                      <= DMA_WRITE;
+          end else begin
+            if (end_compute == 1) begin
+              dma_write_ctrl_valid       <= 1;
+              dma_write_ctrl_data_index  <= 0;
+              dma_write_ctrl_data_length <= n_samples;
+              dma_write_ctrl_data_size   <= 3'b011;
+              dma_write_ctrl_data_user   <= 0;
+              state                      <= DMA_WRITE;
+            end
           end
+          if (dma_write_ctrl_valid && dma_write_ctrl_ready)
+            dma_write_ctrl_valid <= 0;
         end
 
         DMA_WRITE: begin
           if (dma_write_ctrl_valid && dma_write_ctrl_ready)
             dma_write_ctrl_valid <= 0;
 
-          dma_write_chnl_valid <= (rd_ptr < dma_write_ctrl_data_length);
+          dma_write_chnl_valid <= (wr_ptr < dma_write_ctrl_data_length);
 
           if (dma_write_chnl_valid && dma_write_chnl_ready) begin
-            rd_ptr <= rd_ptr + 1;
-            if (rd_ptr == dma_write_ctrl_data_length-1) begin
+            wr_ptr <= wr_ptr + 1;
+            if (wr_ptr == dma_write_ctrl_data_length-1) begin
               dma_write_chnl_valid <= 0;
-              rd_ptr               <= 0;
+              wr_ptr               <= 0;
               state                <= DONE;
             end
           end
@@ -165,20 +187,33 @@ module rtl_trees #(
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       end_compute <= 0;
+      cnt_test   <= 0;
     end else begin
       if (state == COMPUTE) begin
-
+        if (cnt_test < MAX_SAMPLES) begin
+          cnt_test <= cnt_test + 1;
+          predictions[cnt_test] <= cnt_test;
+        end else begin
+          end_compute <= 1;
+        end
       end else begin
+        cnt_test   <= 0;
         end_compute <= 0;
       end
     end
   end
 
-  always_comb dma_write_chnl_data  = predictions[rd_ptr];
+  always_comb begin
+    if (load_trees[0]) begin
+      dma_write_chnl_data  = 32'hDEAD_BEEF; // Dummy data
+    end else begin
+      dma_write_chnl_data  = 32'h0BAD_C0DE; // Dummy data
+    end
+  end
 
   always_comb begin
-    address_node = wr_ptr[TREES_LEN_BITS-1:0];
-    address_tree = wr_ptr[31:TREES_LEN_BITS];
+    address_node = rd_ptr[TREES_LEN_BITS-1:0];
+    address_tree = rd_ptr[31:TREES_LEN_BITS];
   end
 
 

@@ -4,8 +4,9 @@ interface esp_acc_if;
     logic rst;                              // Active-low synchronous reset signal (provided by ESP socket)
 
     // << User-defined configuration registers >>
-    logic [31:0] conf_info_reg0;            // Configuration register 0 (typically used as read data index)
-    logic [31:0] conf_info_reg1;            // Configuration register 1 (typically used as read data length)
+    logic [31:0] load_trees;                // FLAG: load trees
+    logic [31:0] n_features;                // Number of features
+    logic [31:0] n_samples;                 // Number of samples
 
     logic conf_done;                        // One-cycle pulse indicating that configuration registers are valid
 
@@ -72,13 +73,21 @@ class agent_esp_acc;
     endfunction
 
     // Load a contiguous block of 64-bit data into simulated memory
-    task load_memory(input int unsigned base, input int unsigned length, input bit [63:0] data[]);
+    task load_memory(
+        input  int unsigned           base,
+        input  int unsigned           length,
+        input  bit       [63:0]       data[]
+    );
         for (int i = 0; i < length; i++) begin
-            mem[base + i] = data[i];
-            $display("Loading data %0h into memory at index %0d", data[i], base + i);
-            $display("Memory[%0d] = %0h", base + i, mem[base + i]);
+            // tomamos el elemento data[length-1-i] en lugar de data[i]
+            mem[base + i] = data[length-1-i];
+            $display("Loading data %0h into memory at index %0d",
+                     data[length-1-i], base + i);
+            $display("Memory[%0d] = %0h",
+                     base + i, mem[base + i]);
         end
     endtask
+    
 
     // Extract a block of data from simulated memory
     task automatic collect_memory(input int unsigned base, input int unsigned length, ref bit [63:0] data[]);
@@ -91,10 +100,15 @@ class agent_esp_acc;
     endtask
 
     // Drive the full accelerator transaction
-    task run(input int unsigned cfg_index, input int unsigned cfg_length);
+    task run(input int unsigned load_trees,
+             input int unsigned n_features,
+             input int unsigned n_samples);
+
         // CONFIG PHASE: apply registers
-        esp_if.conf_info_reg0 = cfg_index;          // CONFIG example
-        esp_if.conf_info_reg1 = cfg_length;         // CONFIG example
+        esp_if.load_trees = load_trees;
+        esp_if.n_features = n_features;
+        esp_if.n_samples = n_samples;
+        //////////////////////////////
         @(posedge esp_if.clk);
         esp_if.conf_done      = 1;
         @(posedge esp_if.clk);
@@ -102,8 +116,8 @@ class agent_esp_acc;
 
         // READ CONTROL: handshake
         esp_if.dma_read_ctrl_ready = 1;
-        @(posedge esp_if.clk);
         wait (esp_if.dma_read_ctrl_valid && esp_if.dma_read_ctrl_ready);
+        @(posedge esp_if.clk);
         read_index  = esp_if.dma_read_ctrl_data_index;
         read_length = esp_if.dma_read_ctrl_data_length;
         esp_if.dma_read_ctrl_ready = 0;
@@ -112,7 +126,7 @@ class agent_esp_acc;
         esp_if.dma_read_chnl_valid = 1;
         for (int i = 0; i < read_length; ) begin
             esp_if.dma_read_chnl_data = mem[read_index + i];
-            $display("Sending data %0h to read channel", esp_if.dma_read_chnl_data);
+            $display("Sending data %0h to read channel index %d", esp_if.dma_read_chnl_data, read_index + i);
             i++;
             @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
         end
@@ -122,6 +136,7 @@ class agent_esp_acc;
         // WRITE CONTROL: handshake
         esp_if.dma_write_ctrl_ready = 1;
         wait (esp_if.dma_write_ctrl_valid && esp_if.dma_write_ctrl_ready);
+        @(posedge esp_if.clk);
         write_index  = esp_if.dma_write_ctrl_data_index;
         write_length = esp_if.dma_write_ctrl_data_length;
         esp_if.dma_write_ctrl_ready = 0;
@@ -131,7 +146,7 @@ class agent_esp_acc;
         for (int i = 0; i < write_length; ) begin
             @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
             mem[write_index + i] = esp_if.dma_write_chnl_data;
-            $display("Received data %0h from write channel", esp_if.dma_write_chnl_data);
+            $display("Received data %0h from write channel index %d", esp_if.dma_write_chnl_data, write_index + i);
             i++;
         end
         esp_if.dma_write_chnl_ready = 0;

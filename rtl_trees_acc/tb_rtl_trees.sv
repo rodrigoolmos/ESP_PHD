@@ -11,11 +11,17 @@ module tb_rtl_trees;
 
     parameter N_SAMPLES = 10000;    // Number of samples
     parameter COLUMNAS = 33;        // 32 features + 1 label
+
+    parameter N_64_FEATURES = N_SAMPLES/2*(COLUMNAS-1);
   
     bit [63:0] trees            [N_TREES*N_NODES-1:0];
-    bit [63:0] features_mem_64  [N_SAMPLES*COLUMNAS-2:0];
+    bit [63:0] features_mem_64  [N_64_FEATURES-1:0];
     bit [31:0] labels_mem       [N_SAMPLES-1:0];
     bit [31:0] predictions      [N_SAMPLES-1:0];
+
+    bit [31:0] load_trees;
+    bit [31:0] n_features;
+    bit [31:0] n_samples;
 
     bit error_acc;
 
@@ -30,9 +36,9 @@ module tb_rtl_trees;
     )rtl_trees_inst(
         .clk(esp_acc_if_inst.clk),
         .rst_n(esp_acc_if_inst.rst),
-        .LOAD_TREES(LOAD_TREES),
-        .N_FEATURES(N_FEATURES),
-        .N_SAMPLES(N_SAMPLES),
+        .load_trees(esp_acc_if_inst.load_trees),
+        .n_features(esp_acc_if_inst.n_features),
+        .n_samples(esp_acc_if_inst.n_samples),
         .conf_done(esp_acc_if_inst.conf_done),
         .acc_done(esp_acc_if_inst.acc_done),
         .debug(esp_acc_if_inst.debug),
@@ -84,7 +90,7 @@ module tb_rtl_trees;
 
     task read_features(
         input  string nombre_archivo,
-        output bit [63:0] features [N_SAMPLES*COLUMNAS-2:0],    // 32 columnas
+        output bit [63:0] features [N_64_FEATURES-1:0],           // 32 columnas
         output bit [31:0] labels   [N_SAMPLES-1:0]              // última columna
     );
         integer file, status;
@@ -149,18 +155,21 @@ module tb_rtl_trees;
         // Read the trees and features from files
         read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
         read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem_64, labels_mem);
-        agent_esp_acc_inst.gold_gen(
-            trees,
-            COLUMNAS-1,
-            features_mem_64,
-            labels_mem,
-            predictions
-        );
+        // agent_esp_acc_inst.gold_gen(
+        //     trees,
+        //     COLUMNAS-1,
+        //     features_mem_64,
+        //     labels_mem,
+        //     predictions
+        // );
 
         // Load the trees into the RTL module
-        // agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, trees);
+        agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, trees);
+        agent_esp_acc_inst.run(1, 0, 0);
+        
         // Load the features into the RTL module
-        // agent_esp_acc_inst.load_memory(0, N_SAMPLES*32, features_mem_64);
+        agent_esp_acc_inst.load_memory(0, N_64_FEATURES, features_mem_64);
+        agent_esp_acc_inst.run(0, 32, N_SAMPLES);
 
         $finish;
 
