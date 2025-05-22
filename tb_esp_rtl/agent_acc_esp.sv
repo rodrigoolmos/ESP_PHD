@@ -95,8 +95,8 @@ class agent_esp_acc;
 
         // READ CONTROL: handshake
         esp_if.dma_read_ctrl_ready = 1;
-        @(posedge esp_if.clk);
         wait (esp_if.dma_read_ctrl_valid && esp_if.dma_read_ctrl_ready);
+        @(posedge esp_if.clk);
         read_index  = esp_if.dma_read_ctrl_data_index;
         read_length = esp_if.dma_read_ctrl_data_length;
         esp_if.dma_read_ctrl_ready = 0;
@@ -114,8 +114,8 @@ class agent_esp_acc;
 
         // WRITE CONTROL: handshake
         esp_if.dma_write_ctrl_ready = 1;
-        @(posedge esp_if.clk);
         wait (esp_if.dma_write_ctrl_valid && esp_if.dma_write_ctrl_ready);
+        @(posedge esp_if.clk);
         write_index  = esp_if.dma_write_ctrl_data_index;
         write_length = esp_if.dma_write_ctrl_data_length;
         esp_if.dma_write_ctrl_ready = 0;
