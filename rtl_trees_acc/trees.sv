@@ -14,6 +14,9 @@ module forest_top #(
   localparam int FEAT_IDX_W = $clog2(N_FEATURE);
   localparam int CNT_W      = $clog2(N_TREES+1);
 
+  // ---------------------------------------------------
+  //  Feature and tree memory
+  // ---------------------------------------------------
   logic [31:0]                   features   [N_FEATURE];
   logic [63:0]                   tree_mem   [N_TREES][N_NODE_AND_LEAFS];
 
@@ -30,7 +33,7 @@ module forest_top #(
   logic                          prediction_done;
 
   // ---------------------------------------------------
-  // 3) N_TREES engine instances
+  //  N_TREES engine instances
   // ---------------------------------------------------
   genvar t;
   generate
@@ -53,7 +56,7 @@ module forest_top #(
   endgenerate
 
   // ---------------------------------------------------
-  // 4) Votation FSM
+  //  Votation FSM
   // ---------------------------------------------------
   typedef enum logic [1:0] { IDLE, COUNT, SELECT } vote_st_t;
   vote_st_t vote_st, vote_nxt;
@@ -90,7 +93,7 @@ module forest_top #(
   end
 
   // ---------------------------------------------------
-  // 5) Next‐state of the FSM
+  //  Next‐state of the FSM
   // ---------------------------------------------------
   always_comb begin
     vote_nxt = vote_st;
@@ -102,7 +105,7 @@ module forest_top #(
   end
 
   // ---------------------------------------------------
-  // 6) Find the most voted feature
+  //  Find the most voted feature
   // ---------------------------------------------------
   always_comb begin
     value_prediction = '0;
@@ -113,7 +116,7 @@ module forest_top #(
   end
 
   // ---------------------------------------------------
-  // 7) Store votation
+  //  Store votation
   // ---------------------------------------------------
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
