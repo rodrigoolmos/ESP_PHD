@@ -1,4 +1,4 @@
-module name #(
+module tree #(
     parameter int N_NODE_AND_LEAFS = 256,
     parameter int N_FEATURE        = 32
 ) (
@@ -8,19 +8,21 @@ module name #(
     input  logic [31:0]                             feature,
     output logic [$clog2(N_FEATURE)-1:0]            feature_index,
     input  logic [63:0]                             node,
-    output logic [$clog2(N_FEATURE)-1:0]            node_index,
+    output logic [$clog2(N_NODE_AND_LEAFS)-1:0]     node_index,
     output logic signed [31:0]                      leaf_value,
     output logic                                    done
 );
 
-    typedef enum logic[1:0] { IDLE, FETCH, PROCESS, DONE} tree_state;
+    typedef enum logic[2:0] { IDLE, FETCH_NODE, FETCH_FEAT, PROCESS, DONE} tree_state;
     tree_state tree_st;
 
     typedef struct packed {
-        logic [7:0]   f_index;
-        logic [7:0]   leaf_or_node;
-        logic [15:0]  next_node_right_index;
         logic [31:0]  value;
+        logic [7:0]   padding2;
+        logic [7:0]   next_node_right_index;
+        logic [7:0]   f_index;
+        logic [6:0]   padding1;
+        logic         leaf_or_node;
     } tree_camps_t;
 
     tree_camps_t camps;
@@ -28,7 +30,6 @@ module name #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             tree_st <= IDLE;
-            feature_index <= 0;
             node_index <= 0;
             leaf_value <= 0;
             done <= 0;
@@ -36,19 +37,22 @@ module name #(
             case (tree_st)
                 IDLE: begin
                     if (start) begin
-                        tree_st <= FETCH;
-                        feature_index <= 0;
+                        tree_st <= FETCH_NODE;
                         node_index <= 0;
                         leaf_value <= 0;
                         done <= 0;
                     end
                 end
 
-                FETCH: begin
-                    // Fetch the next feature and node
-                    tree_st <= PROCESS;
+                FETCH_NODE: begin
+                    tree_st <= FETCH_FEAT;
                     camps <= tree_camps_t'(node);
                 end
+
+                FETCH_FEAT: begin
+                    tree_st <= PROCESS;
+                    feature_index <= camps.f_index;
+                end 
 
                 PROCESS: begin
                     // Process the current node
@@ -58,14 +62,12 @@ module name #(
                         tree_st <= DONE;
                     end else begin
                         // It's a decision node, update feature index and node index
-                        feature_index <= camps.f_index;
                         if (feature < camps.value) begin
                             node_index <= node_index +1;
                         end else begin
                             node_index <= camps.next_node_right_index;
                         end
-                        // Prepare for next fetch
-                        tree_st <= FETCH;
+                        tree_st <= FETCH_NODE;
                     end
 
                 end
@@ -79,6 +81,5 @@ module name #(
             endcase
         end
     end
-
 
 endmodule

@@ -1,4 +1,4 @@
-module forest_top #(
+module trees #(
   parameter int N_TREES          = 16,
   parameter int N_NODE_AND_LEAFS = 256,
   parameter int N_FEATURE        = 32
@@ -32,7 +32,7 @@ module forest_top #(
   logic [31:0]                      leaf_vals  [N_TREES];
   logic [N_TREES-1:0]               tree_done;
 
-  logic [FEAT_IDX_W-1:0]            feature_idx[N_TREES];
+  logic [$clog2(N_FEATURE)-1:0]     feature_idx [FEAT_IDX_W-1:0];
   logic [$clog2(N_NODE_AND_LEAFS)-1:0] 
                                     node_idx   [N_TREES];
 
@@ -45,7 +45,7 @@ module forest_top #(
   // ---------------------------------------------------
   genvar t;
   generate
-    for (t = 0; t < N_TREES; t++) begin : TREE_INST
+    for (t = 0; t < N_TREES; t++) begin
       tree #(
         .N_NODE_AND_LEAFS(N_NODE_AND_LEAFS),
         .N_FEATURE(N_FEATURE)
@@ -54,7 +54,7 @@ module forest_top #(
         .rst_n         (rst_n),
         .start         (start),
         .feature       (features[feature_idx[t]]),
-        .feature_index(feature_idx[t]),
+        .feature_index (feature_idx[t]),
         .node          (tree_mem[t][node_idx[t]]),
         .node_index    (node_idx[t]),
         .leaf_value    (leaf_vals[t]),
@@ -82,8 +82,8 @@ module forest_top #(
   typedef enum logic [1:0] { IDLE, COUNT, SELECT } vote_st_t;
   vote_st_t vote_st, vote_nxt;
 
-  integer i;
   always_ff @(posedge clk or negedge rst_n) begin
+    integer i;
     if (!rst_n) begin
       vote_st        <= IDLE;
       prediction_done<= 1'b0;
@@ -127,6 +127,7 @@ module forest_top #(
   //  Find the most voted feature
   // ---------------------------------------------------
   always_comb begin
+    integer i;
     value_prediction = '0;
     for (i = 0; i < N_FEATURE; i++) begin
       if (voted_features[i] > voted_features[value_prediction])
