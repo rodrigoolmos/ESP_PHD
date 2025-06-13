@@ -22,23 +22,25 @@ module trees #(
 
   localparam int FEAT_IDX_W       = $clog2(N_FEATURE);
   localparam int CNT_W            = $clog2(N_TREES+1);
+  localparam int N_NODE_W         = $clog2(N_NODE_AND_LEAFS);
 
   // ---------------------------------------------------
   //  Feature and tree memory
   // ---------------------------------------------------
-  logic [31:0]                      features   [N_FEATURE];
-  logic [63:0]                      tree_mem   [N_TREES][N_NODE_AND_LEAFS];
+  logic [31:0]                      features   [N_FEATURE-1:0];
+  logic [63:0]                      tree_mem   [N_TREES-1:0][N_NODE_AND_LEAFS-1:0];
 
-  logic [31:0]                      leaf_vals  [N_TREES];
+  logic [31:0]                      leaf_vals  [N_TREES-1:0];
   logic [N_TREES-1:0]               tree_done;
 
-  logic [$clog2(N_FEATURE)-1:0]     feature_idx [FEAT_IDX_W-1:0];
-  logic [$clog2(N_NODE_AND_LEAFS)-1:0] 
-                                    node_idx   [N_TREES];
+  logic [FEAT_IDX_W-1:0]            feature_idx [N_TREES-1:0];
+  logic [N_NODE_W-1:0]              node_idx [N_TREES-1:0];
 
-  logic [CNT_W-1:0]                 voted_features [N_FEATURE];
+  logic [CNT_W-1:0]                 voted_features [N_FEATURE-1:0];
+  logic [CNT_W-1:0]                 tmp_voted;
+  logic [CNT_W-1:0]                 voted_features_ff [N_FEATURE-1:0];
   logic [FEAT_IDX_W-1:0]            value_prediction;
-  logic                             prediction_done;
+  logic                             start_ff;
 
   // ---------------------------------------------------
   //  N_TREES engine instances
@@ -63,6 +65,12 @@ module trees #(
     end
   endgenerate
 
+  typedef enum logic [1:0] { IDLE, COUNT, SELECT } vote_st_t;
+  vote_st_t vote_st;
+
+  // ---------------------------------------------------
+  //  LOAD TREES AND FEATURES
+  // ---------------------------------------------------
   always_ff @(posedge clk) begin
     if (load_trees) begin
       tree_mem[n_tree][n_node] <= tree_nodes;
@@ -77,77 +85,73 @@ module trees #(
   end
 
   // ---------------------------------------------------
-  //  Votation FSM
+  //  VOTE PROCESS
   // ---------------------------------------------------
-  typedef enum logic [1:0] { IDLE, COUNT, SELECT } vote_st_t;
-  vote_st_t vote_st, vote_nxt;
+  always_comb begin
+    for (int i = 0; i < N_FEATURE; i = i + 1) begin
+        voted_features[i] = 0;
+    end
+    for (int i = 0; i < N_TREES; i = i + 1) begin
+        voted_features[ leaf_vals[i] ]++;
+    end
+  end
 
   always_ff @(posedge clk or negedge rst_n) begin
-    integer i;
+      if (!rst_n) begin
+        for (int i = 0; i < N_FEATURE; i = i + 1) begin
+            voted_features_ff[i] <= 0;
+        end
+      end else begin
+        for (int i = 0; i < N_FEATURE; i = i + 1) begin
+            voted_features_ff[i] <= voted_features[i];
+        end
+      end    
+  end
+
+  always_comb begin
+      tmp_voted        = voted_features_ff[0];
+      value_prediction = 0;
+      for (int i = 1; i < N_FEATURE; i = i + 1) begin
+          if (voted_features_ff[i] > tmp_voted) begin
+              tmp_voted        = voted_features_ff[i];
+              value_prediction = i;
+          end
+      end
+  end
+
+
+  always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      vote_st        <= IDLE;
-      prediction_done<= 1'b0;
-      for (i=0; i<N_FEATURE; i++) voted_features[i] <= '0;
+      prediction <= 0;
+      done <= 0;
+      vote_st <= IDLE;
     end else begin
-      vote_st        <= vote_nxt;
       case (vote_st)
+
         IDLE: begin
-          if (start && &tree_done) begin
-            for (i=0; i<N_FEATURE; i++) voted_features[i] <= '0;
+          if (start) begin
+            start_ff <= 1;
+          end
+          done <= 0;
+          if (start_ff && &tree_done) begin
+            vote_st <= COUNT;
           end
         end
+
         COUNT: begin
-          for (i=0; i<N_TREES; i++) begin
-            voted_features[ leaf_vals[i] ] <= voted_features[ leaf_vals[i] ] + 1;
-          end
+            vote_st <= SELECT;
         end
+
         SELECT: begin
-          // Select the most voted feature
+          start_ff <= 0;
+          prediction <= value_prediction;
+          done <= 1;
+          vote_st <= IDLE;
         end
+
       endcase
-
-      // handshake done
-      prediction_done<= (vote_st == SELECT);
     end
   end
 
-  // ---------------------------------------------------
-  //  Next‐state of the FSM
-  // ---------------------------------------------------
-  always_comb begin
-    vote_nxt = vote_st;
-    case (vote_st)
-      IDLE:   if (start && &tree_done) vote_nxt = COUNT;
-      COUNT:  vote_nxt = SELECT;
-      SELECT: vote_nxt = IDLE;
-    endcase
-  end
-
-  // ---------------------------------------------------
-  //  Find the most voted feature
-  // ---------------------------------------------------
-  always_comb begin
-    integer i;
-    value_prediction = '0;
-    for (i = 0; i < N_FEATURE; i++) begin
-      if (voted_features[i] > voted_features[value_prediction])
-        value_prediction = i[FEAT_IDX_W-1:0];
-    end
-  end
-
-  // ---------------------------------------------------
-  //  Store votation
-  // ---------------------------------------------------
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      prediction <= '0;
-      done       <= 1'b0;
-    end else if (prediction_done) begin
-      prediction <= value_prediction;
-      done       <= 1'b1;
-    end else if (start) begin
-      done       <= 1'b0;
-    end
-  end
 
 endmodule

@@ -12,10 +12,10 @@ module tb_trees;
     parameter TREES_LEN_BITS   = $clog2(N_NODES);
     parameter TREE_IDX_BITS    = $clog2(N_TREES);
 
-    parameter N_SAMPLES = 10000;    // Number of samples
-    parameter COLUMNAS = 33;        // 32 features + 1 label
+    parameter N_SAMPLES        = 10000;    // Number of samples
+    parameter COLUMNAS         = 33;        // 32 features + 1 label
 
-    parameter N_64_FEATURES = N_SAMPLES/2*(COLUMNAS-1);
+    parameter N_64_FEATURES    = N_SAMPLES/2*(COLUMNAS-1);
 
     // Memorias
     bit [63:0] trees            [N_TREES*N_NODES-1:0];
@@ -132,27 +132,28 @@ module tb_trees;
         $fclose(file);
     endtask
 
-    task coppy_features(int n_features);
+    // TODO
+    task coppy_features(int n_features, int offset = 0);
+        load_features = 1;
         for (int i = 0; i < n_features; i++) begin
-            features2 = features_mem_64[i];
+            features2 = features_mem_64[i + offset];
             n_feature = 2*i;
-            load_features = 1;
             @(posedge clk);
-            load_features = 0;
         end
+        load_features = 0;
     endtask
 
     task coppy_trees(int n_trees, int n_nodes);
+        load_trees = 1;
         for (int i = 0; i < n_trees; i++) begin
             for (int j = 0; j < n_nodes; j++) begin
                 tree_nodes = trees[i*n_nodes + j];
                 n_tree = i;
                 n_node = j;
-                load_trees = 1;
                 @(posedge clk);
-                load_trees = 0;
             end
         end
+        load_trees = 0;
     endtask
 
     // Clock generation
@@ -176,7 +177,7 @@ module tb_trees;
     read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
     coppy_trees(N_TREES, N_NODES);
     read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem_64, labels_mem);
-    coppy_features(N_64_FEATURES);
+    coppy_features(16, 2*16);
 
     // Iniciar la predicción
     start = 1;
@@ -184,10 +185,11 @@ module tb_trees;
     start = 0;
 
     // Esperar a que se complete la predicción
-    #100ns;
     while (!done) begin
         @(posedge clk);
     end
+    #1000ns;
+    @(posedge clk);
 
     // Mostrar el resultado de la predicción
     $display("Predicción: %d", prediction);

@@ -5,11 +5,11 @@ module tree #(
     input  logic                                    clk,
     input  logic                                    rst_n,
     input  logic                                    start,
-    input  logic [31:0]                             feature,
+    input  logic signed [31:0]                      feature,
     output logic [$clog2(N_FEATURE)-1:0]            feature_index,
     input  logic [63:0]                             node,
     output logic [$clog2(N_NODE_AND_LEAFS)-1:0]     node_index,
-    output logic signed [31:0]                      leaf_value,
+    output logic [31:0]                             leaf_value,
     output logic                                    done
 );
 
@@ -17,12 +17,12 @@ module tree #(
     tree_state tree_st;
 
     typedef struct packed {
-        logic [31:0]  value;
-        logic [7:0]   padding2;
-        logic [7:0]   next_node_right_index;
-        logic [7:0]   f_index;
-        logic [6:0]   padding1;
-        logic         leaf_or_node;
+        logic signed [31:0]     value;
+        logic [7:0]             padding2;
+        logic [7:0]             next_node_right_index;
+        logic [7:0]             f_index;
+        logic [6:0]             padding1;
+        logic                   leaf_or_node;
     } tree_camps_t;
 
     tree_camps_t camps;
@@ -33,6 +33,7 @@ module tree #(
             node_index <= 0;
             leaf_value <= 0;
             done <= 0;
+            feature_index <= 0;
         end else begin
             case (tree_st)
                 IDLE: begin
@@ -64,6 +65,7 @@ module tree #(
                         // It's a decision node, update feature index and node index
                         if (feature < camps.value) begin
                             node_index <= node_index +1;
+                            $display("Feature[%0d]=%0d < threshold=%0d → LEFT", feature_index, feature, camps.value);
                         end else begin
                             node_index <= camps.next_node_right_index;
                         end
