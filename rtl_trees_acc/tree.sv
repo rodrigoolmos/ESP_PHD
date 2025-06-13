@@ -13,7 +13,7 @@ module tree #(
     output logic                                    done
 );
 
-    typedef enum logic[2:0] { IDLE, FETCH_NODE, FETCH_FEAT, PROCESS, DONE} tree_state;
+    typedef enum logic[1:0] { IDLE, FETCH_NODE, PROCESS, DONE} tree_state;
     tree_state tree_st;
 
     typedef struct packed {
@@ -33,7 +33,6 @@ module tree #(
             node_index <= 0;
             leaf_value <= 0;
             done <= 0;
-            feature_index <= 0;
         end else begin
             case (tree_st)
                 IDLE: begin
@@ -46,14 +45,9 @@ module tree #(
                 end
 
                 FETCH_NODE: begin
-                    tree_st <= FETCH_FEAT;
+                    tree_st <= PROCESS;
                     camps <= tree_camps_t'(node);
                 end
-
-                FETCH_FEAT: begin
-                    tree_st <= PROCESS;
-                    feature_index <= camps.f_index;
-                end 
 
                 PROCESS: begin
                     // Process the current node
@@ -65,7 +59,6 @@ module tree #(
                         // It's a decision node, update feature index and node index
                         if (feature < camps.value) begin
                             node_index <= node_index +1;
-                            $display("Feature[%0d]=%0d < threshold=%0d → LEFT", feature_index, feature, camps.value);
                         end else begin
                             node_index <= camps.next_node_right_index;
                         end
@@ -83,5 +76,7 @@ module tree #(
             endcase
         end
     end
+
+    always_comb feature_index = camps.f_index;
 
 endmodule

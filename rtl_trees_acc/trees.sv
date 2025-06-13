@@ -124,6 +124,7 @@ module trees #(
     if (!rst_n) begin
       prediction <= 0;
       done <= 0;
+      start_ff <= 0;
       vote_st <= IDLE;
     end else begin
       case (vote_st)

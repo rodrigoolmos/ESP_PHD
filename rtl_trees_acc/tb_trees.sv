@@ -177,19 +177,22 @@ module tb_trees;
     read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
     coppy_trees(N_TREES, N_NODES);
     read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem_64, labels_mem);
-    coppy_features(16, 2*16);
+    
+    for (int i=0; i<100; ++i) begin
+        coppy_features(16, i*16);
 
-    // Iniciar la predicción
-    start = 1;
-    @(posedge clk);
-    start = 0;
-
-    // Esperar a que se complete la predicción
-    while (!done) begin
+        // Iniciar la predicción
+        start = 1;
         @(posedge clk);
+        start = 0;
+
+        // Esperar a que se complete la predicción
+        while (!done) begin
+            @(posedge clk);
+        end
+        #1000ns;
+        @(posedge clk);        
     end
-    #1000ns;
-    @(posedge clk);
 
     // Mostrar el resultado de la predicción
     $display("Predicción: %d", prediction);
