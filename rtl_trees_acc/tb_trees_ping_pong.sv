@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module tb_trees;
+module tb_trees_ping_pong;
 
     const integer t_clk    = 10;    // Clock period 100MHz
 
@@ -9,8 +9,10 @@ module tb_trees;
     parameter N_TREES          = 128;
     parameter N_NODES          = 256;
     parameter N_FEATURE        = 32;
+    parameter MAX_BURST        = 54;
     parameter TREES_LEN_BITS   = $clog2(N_NODES);
     parameter TREE_IDX_BITS    = $clog2(N_TREES);
+    parameter MAX_BURST_BITS    = $clog2(MAX_BURST);
 
     parameter N_SAMPLES        = 10000;    // Number of samples
     parameter COLUMNAS         = 33;        // 32 features + 1 label
@@ -18,9 +20,10 @@ module tb_trees;
     parameter N_64_FEATURES    = N_SAMPLES/2*(COLUMNAS-1);
 
     // Memorias
-    bit [63:0] trees            [N_TREES*N_NODES-1:0];
-    bit [63:0] features_mem_64  [N_64_FEATURES-1:0];
-    bit [31:0] labels_mem       [N_SAMPLES-1:0];
+    bit [63:0]      trees            [N_TREES*N_NODES-1:0];
+    bit [63:0]      features_mem_64  [N_64_FEATURES-1:0];
+    bit [31:0]      labels_mem       [N_SAMPLES-1:0];
+    bit [7:0][7:0]  predictions      [N_SAMPLES-1:0];
 
     // Señales
     logic clk;
@@ -33,29 +36,37 @@ module tb_trees;
     logic [63:0] tree_nodes;
 
     logic load_features;
-    logic [31:0] n_feature;
+    logic [31:0] feature_addr;
+    logic [MAX_BURST_BITS-1:0] burst_len;
     logic [63:0] features2;
 
-    logic signed [31:0] prediction;
+    logic [63:0] prediction;
+    logic [MAX_BURST_BITS-1:0] prediction_addr;
     logic done;
 
     // Instancia del DUT
-    trees #(
+    trees_ping_pong #(
         .N_TREES(N_TREES),
         .N_NODE_AND_LEAFS(N_NODES),
-        .N_FEATURE(N_FEATURE)
-    ) trees_ins (
+        .N_FEATURE(N_FEATURE),
+        .MAX_BURST(MAX_BURST)
+    ) trees_ping_pong_ins (
         .clk(clk),
         .rst_n(rst_n),
         .start(start),
+
         .load_trees(load_trees),
         .n_node(n_node),
         .n_tree(n_tree),
         .tree_nodes(tree_nodes),
+
         .load_features(load_features),
-        .n_feature(n_feature),
+        .feature_addr(feature_addr),
+        .burst_len(burst_len),
         .features2(features2),
+
         .prediction(prediction),
+        .prediction_addr(prediction_addr),
         .done(done)
     );
 
@@ -132,12 +143,11 @@ module tb_trees;
         $fclose(file);
     endtask
 
-    // TODO
     task coppy_features(int n_features, int offset = 0);
         load_features = 1;
         for (int i = 0; i < n_features; i++) begin
             features2 = features_mem_64[i + offset];
-            n_feature = 2*i;
+            feature_addr = i;
             @(posedge clk);
         end
         load_features = 0;
@@ -154,6 +164,19 @@ module tb_trees;
             end
         end
         load_trees = 0;
+    endtask
+
+    task read_predictions(int n_predictions);
+        int i;
+        for (i = 0; i < n_predictions; i++) begin
+            predictions[i] = prediction;
+            if (i%8==0) begin
+                prediction_addr = i/8;
+                @(posedge clk);
+            end
+            for (int j=0; j<8; ++j)
+                $display("Predicción %0d: %0d", i, predictions[i][j]);
+        end
     endtask
 
     // Clock generation
@@ -178,24 +201,23 @@ module tb_trees;
     coppy_trees(N_TREES, N_NODES);
     read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem_64, labels_mem);
     
-    for (int i=0; i<100; ++i) begin
-        coppy_features(16, i*16);
+    coppy_features(MAX_BURST*16, 0);
 
-        // Iniciar la predicción
-        start = 1;
+    // Iniciar la predicción
+    start = 1;
+    burst_len = MAX_BURST; // Longitud del burst
+    @(posedge clk);
+    start = 0;
+
+    // Esperar a que se complete la predicción
+    while (!done) begin
         @(posedge clk);
-        start = 0;
-
-        // Esperar a que se complete la predicción
-        while (!done) begin
-            @(posedge clk);
-        end
-        #1000ns;
-        @(posedge clk);        
     end
+    #1000ns;
+    @(posedge clk);        
 
-    // Mostrar el resultado de la predicción
-    $display("Predicción: %d", prediction);
+    // Mostrar el resultado de las predicciones
+    read_predictions(MAX_BURST);
 
     // Finalizar simulación
     $finish;
