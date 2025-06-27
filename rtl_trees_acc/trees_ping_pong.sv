@@ -180,6 +180,7 @@ module trees_ping_pong #(
 		end else begin
 			case (proc_st)
 				P_IDLE: begin
+					start_set <= 0;
 					done <= 0;
 					prediction_packed <= 0;
 					if (start) begin

@@ -179,6 +179,9 @@ module tb_trees_ping_pong;
             for (j=0; j<8; ++j) begin
                 predictions_hw[i*8+j+offset] = prediction[8*j+: 8];
                 $display("Predicción %0d: %0d", i*8+j+offset, predictions_hw[i*8+j+offset]);
+                if (predictions_sw[i*8+j+offset] != predictions_hw[i*8+j+offset])
+                    $display("ERROR: Predicción incorrecta en [%0d]: %0d != %0d",
+                             i*8+j+offset, predictions_sw[i*8+j+offset], predictions_hw[i*8+j+offset]);
             end
         end
         prediction_addr = i;
@@ -186,6 +189,9 @@ module tb_trees_ping_pong;
         for (j=0; j<n_predictions%8; ++j) begin
             predictions_hw[i*8+j+offset] = prediction[8*j+: 8];
             $display("Predicción %0d: %0d", i*8+j+offset, predictions_hw[i*8+j+offset]);
+            if (predictions_sw[i*8+j+offset] != predictions_hw[i*8+j+offset])
+                $display("ERROR: Predicción incorrecta en [%0d]: %0d != %0d",
+                         i*8+j+offset, predictions_sw[i*8+j+offset], predictions_hw[i*8+j+offset]);
         end
 
         offset = offset + n_predictions;
@@ -315,7 +321,7 @@ module tb_trees_ping_pong;
     // Leer árboles y características desde archivos
     read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
     coppy_trees(N_TREES, N_NODES);
-    read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec_shuffled.dat", features_mem_64, labels_mem);
+    read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem_64, labels_mem);
 
     // Generar predicciones de referencia
     gold_gen(trees, N_FEATURE, features_mem_64, labels_mem, predictions_sw);
@@ -328,16 +334,6 @@ module tb_trees_ping_pong;
         $display("Data processed: %0d, Samples to process: %0d", data_processed, samples_2_process);
         launch_prediction(samples_2_process);
         data_processed += samples_2_process;
-    end
-
-    for (int num_sets=0; num_sets<N_SAMPLES; ++num_sets) begin
-        assert (predictions_sw[num_sets] == predictions_hw[num_sets])
-            else begin
-                $error("Assert predictions_sw != predictions_hw failed!");
-                $display("predictions_sw[%0d] = %0d, predictions_hw[%0d] = %0d", 
-                         num_sets, predictions_sw[num_sets], num_sets, predictions_hw[num_sets]);
-                //$stop;
-            end
     end
 
     // Finalizar simulación
