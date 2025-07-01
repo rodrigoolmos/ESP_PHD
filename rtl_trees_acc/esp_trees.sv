@@ -1,10 +1,10 @@
 `timescale 1us/1ns
 
 module esp_trees #(
-	parameter int N_TREES          					= 16,
-	parameter int N_NODE_AND_LEAFS 					= 256,
-	parameter int N_FEATURE        					= 32,
-	parameter int MAX_BURST        					= 5000
+	parameter N_TREES          					= 16,
+	parameter N_NODE_AND_LEAFS 					= 256,		// POWER OF 2
+	parameter N_FEATURE        					= 32,
+	parameter MAX_BURST        					= 5000
 ) (
 	input  logic        clk,
 	input  logic        rst_n,                          // Active-low reset
@@ -46,7 +46,7 @@ module esp_trees #(
 	output logic [63:0] dma_write_chnl_data
 );
 
-	localparam integer TREES_LEN_BITS  = $clog2(N_TREES*N_NODE_AND_LEAFS);
+	localparam integer TREES_LEN_BITS  = $clog2(N_NODE_AND_LEAFS);
 
 	typedef enum logic [2:0] {
 		IDLE      = 0,
@@ -66,6 +66,8 @@ module esp_trees #(
 	logic                           start;
 	logic                           writing;
 
+	logic                           load_trees_s;
+
 	// TREES COMPUTE UNIT
 	trees_ping_pong #(
 		.N_TREES(N_TREES),
@@ -76,14 +78,17 @@ module esp_trees #(
 		.clk(clk),
 		.rst_n(rst_n),
 		.start(start),
-		.load_trees(load_trees),
+		
+		.load_trees(load_trees_s),
 		.n_node(address_node),
 		.n_tree(address_tree),
 		.tree_nodes(dma_read_chnl_data),
+
 		.load_features(load_features),
 		.feature_addr(rd_ptr),
 		.burst_len(burst_len),
 		.features2(dma_read_chnl_data),
+
 		.prediction(prediction),
 		.prediction_addr(wr_ptr),
 		.done(end_compute)
@@ -118,12 +123,10 @@ module esp_trees #(
 					if (conf_done) begin
 						dma_read_ctrl_valid       <= 1;
 						dma_read_ctrl_data_index  <= 0;
-						load_features		   	  <= 0;
 						if (load_trees[0])
 							dma_read_ctrl_data_length <= N_TREES * N_NODE_AND_LEAFS;
 						else begin
-							dma_read_ctrl_data_length <= (burst_len * n_features + 1) >> 1;
-							load_features		   	   <= 1;
+							dma_read_ctrl_data_length <= (burst_len * n_features + 1) >> 1; // FEATURES COME IN PAIRS
 						end
 						dma_read_ctrl_data_size   <= 3'b011;
 						dma_read_ctrl_data_user   <= 0;
@@ -136,14 +139,17 @@ module esp_trees #(
 					start <= 0;
 					if (dma_read_ctrl_valid && dma_read_ctrl_ready)
 						dma_read_ctrl_valid <= 0;
+					if(!load_trees[0]) 
+						load_features <= 1;
 
 					if (dma_read_chnl_valid && dma_read_chnl_ready) begin
 						rd_ptr <= rd_ptr + 1;
 						if (rd_ptr == dma_read_ctrl_data_length - 1) begin
-							start <= 1;
+							start <= !load_trees[0]; // Start computation only if not loading trees
 							dma_read_chnl_ready <= 0;
 							rd_ptr <= 0;
 							state  <= COMPUTE;
+							load_features		   	  <= 0;
 						end
 					end
 				end
@@ -160,7 +166,7 @@ module esp_trees #(
 					end else if (end_compute) begin
 						dma_write_ctrl_valid       <= 1;
 						dma_write_ctrl_data_index  <= 0;
-						dma_write_ctrl_data_length <= burst_len;
+						dma_write_ctrl_data_length <= (burst_len + 7) >> 3; //ceil(x / 8)
 						dma_write_ctrl_data_size   <= 3'b011;
 						dma_write_ctrl_data_user   <= 0;
 						state                      <= DMA_WRITE;
@@ -199,6 +205,7 @@ module esp_trees #(
 
 	always_comb dma_write_chnl_valid = writing;
 	always_comb debug = {29'd0, state};
+	always_comb load_trees_s = state == DMA_READ ? load_trees[0] : 0;
 
 	always_comb begin
 		if (state == DMA_WRITE) begin

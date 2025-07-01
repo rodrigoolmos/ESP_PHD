@@ -1,8 +1,8 @@
 module trees_ping_pong #(
-    parameter int N_TREES          					= 16,
-    parameter int N_NODE_AND_LEAFS 					= 256,
-    parameter int N_FEATURE        					= 32,
-    parameter int MAX_BURST        					= 5000
+	parameter N_TREES          					= 16,
+	parameter N_NODE_AND_LEAFS 					= 256,
+	parameter N_FEATURE        					= 32,
+	parameter MAX_BURST        					= 5000
 )(
     input  logic                                    clk,
     input  logic                                    rst_n,

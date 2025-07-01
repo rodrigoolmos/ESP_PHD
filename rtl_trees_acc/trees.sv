@@ -1,7 +1,7 @@
 module trees #(
-  	parameter int N_TREES          = 16,
-  	parameter int N_NODE_AND_LEAFS = 256,
-  	parameter int N_FEATURE        = 32
+  	parameter N_TREES          = 16,
+  	parameter N_NODE_AND_LEAFS = 256,
+  	parameter N_FEATURE        = 32
 )(
 	input  logic                                    clk,
 	input  logic                                    rst_n,
@@ -18,9 +18,9 @@ module trees #(
 	output logic                                    done
 );
 
-	localparam int FEAT_IDX_W       = $clog2(N_FEATURE);
-	localparam int CNT_W            = $clog2(N_TREES+1);
-	localparam int N_NODE_W         = $clog2(N_NODE_AND_LEAFS);
+	localparam FEAT_IDX_W       = $clog2(N_FEATURE);
+	localparam CNT_W            = $clog2(N_TREES+1);
+	localparam N_NODE_W         = $clog2(N_NODE_AND_LEAFS);
 
 	// ---------------------------------------------------
 	//  Feature and tree memory

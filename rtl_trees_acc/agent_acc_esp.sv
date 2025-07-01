@@ -6,7 +6,7 @@ interface esp_acc_if;
     // << User-defined configuration registers >>
     logic [31:0] load_trees;                // FLAG: load trees
     logic [31:0] n_features;                // Number of features
-    logic [31:0] n_samples;                 // Number of samples
+    logic [31:0] burst_len;                 // Burst length
 
     logic conf_done;                        // One-cycle pulse indicating that configuration registers are valid
 
@@ -59,6 +59,12 @@ class agent_esp_acc;
     int unsigned write_index;
     int unsigned write_length;
 
+    // Local storage for predictions
+    bit [7:0] predictions_sw[N_SAMPLES-1:0];
+    bit [7:0] predictions_hw[N_SAMPLES-1:0];
+    int predictions_count = 0;
+    int mismatches_count = 0;
+
     // Simulated memory array
     bit [63:0] mem[*];
 
@@ -74,40 +80,72 @@ class agent_esp_acc;
 
     // Load a contiguous block of 64-bit data into simulated memory
     task load_memory(
-        input  int unsigned           base,
-        input  int unsigned           length,
-        input  bit       [63:0]       data[]
+        input int unsigned base,
+        input int unsigned n_elements,
+        input int unsigned offset,
+        input bit [63:0] data[]
     );
-        for (int i = 0; i < length; i++) begin
-            // tomamos el elemento data[length-1-i] en lugar de data[i]
-            mem[base + i] = data[length-1-i];
-            $display("Loading data %0h into memory at index %0d",
-                     data[length-1-i], base + i);
-            $display("Memory[%0d] = %0h",
-                     base + i, mem[base + i]);
+        int start_idx = data.size() - offset - 1;
+
+        for (int i = 0; i < n_elements; i++) begin
+            int idx = start_idx - i;
+            mem[base + i] = data[idx];
         end
     endtask
-    
+
+    local task read_predictions(int n_predictions);
+        int i, j;
+        for (i = 0; i < n_predictions/8; i++) begin
+            for (j=0; j<8; ++j) begin
+                predictions_hw[predictions_count++] = mem[read_index + i][8*j+: 8];
+                $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
+                if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1]) begin
+                    mismatches_count++;
+                    //$stop;
+                end            
+            end
+        end
+        for (j=0; j<n_predictions%8; ++j) begin
+            predictions_hw[predictions_count++] = mem[read_index + i][8*j+: 8];
+            $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
+            if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1]) begin
+                mismatches_count++;
+                //$stop;
+            end
+        end
+    endtask
 
     // Extract a block of data from simulated memory
     task automatic collect_memory(input int unsigned base, input int unsigned length, ref bit [63:0] data[]);
         data = new[length];
         for (int i = 0; i < length; i++) begin
             data[i] = mem[base + i];
-            $display("Collecting data %0h from memory at index %0d", data[i], base + i);
-            $display("Memory[%0d] = %0h", base + i, mem[base + i]);
         end
     endtask
+
+    function void print_metrics(input bit [31:0] labels[N_SAMPLES-1:0]);
+        int correct = 0;
+        // Imprime los resultados
+        for (int p = 0; p < 10000; ++p) begin
+            if (labels[p] == predictions_hw[p]) begin
+                correct++;
+            end
+        end
+
+        $display("Correct predictions hw: %0d of %0d", correct, 10000);
+        $display("Accuracy: %f", (correct / 10000.0));
+        $display("Mismatches: %0d", mismatches_count);
+    endfunction
 
     // Drive the full accelerator transaction
     task run(input int unsigned load_trees,
              input int unsigned n_features,
-             input int unsigned n_samples);
+             input int unsigned burst_len);
 
         // CONFIG PHASE: apply registers
         esp_if.load_trees = load_trees;
         esp_if.n_features = n_features;
-        esp_if.n_samples = n_samples;
+        esp_if.burst_len = burst_len;
         //////////////////////////////
         @(posedge esp_if.clk);
         esp_if.conf_done      = 1;
@@ -126,7 +164,6 @@ class agent_esp_acc;
         esp_if.dma_read_chnl_valid = 1;
         for (int i = 0; i < read_length; ) begin
             esp_if.dma_read_chnl_data = mem[read_index + i];
-            $display("Sending data %0h to read channel index %d", esp_if.dma_read_chnl_data, read_index + i);
             i++;
             @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
         end
@@ -146,7 +183,6 @@ class agent_esp_acc;
         for (int i = 0; i < write_length; ) begin
             @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
             mem[write_index + i] = esp_if.dma_write_chnl_data;
-            $display("Received data %0h from write channel index %d", esp_if.dma_write_chnl_data, write_index + i);
             i++;
         end
         esp_if.dma_write_chnl_ready = 0;
@@ -154,25 +190,17 @@ class agent_esp_acc;
 
         // WAIT for accelerator to assert acc_done
         wait (esp_if.acc_done == 1);
-    endtask
+        @(posedge esp_if.clk);
 
-    // Validate the results against a gold standard
-    function bit validate_acc(input bit [63:0] result_acc[], input bit [63:0] gold[], input int unsigned length);
-        for (int i = 0; i < length; i++) begin
-            if (result_acc[i] != gold[i]) begin
-                $display("Mismatch at index %0d: expected %0h, got %0h", i, gold[i], result_acc[i]);
-                return 1;
-            end
-        end
-        return 0;
-    endfunction
+        // Read predictions from memory
+        read_predictions(burst_len);
+    endtask
 
     // Generate a gold standard for the expected output
     task automatic gold_gen(input bit[63:0] trees [N_NODES*N_TREES-1:0], 
                             input integer n_features, 
-                            input bit [63:0] features[N_SAMPLES*COLUMNAS-2:0], 
-                            input bit [31:0] labels[N_SAMPLES-1:0], 
-                            ref   bit [31:0] predictions[9999:0]);
+                            input bit [63:0] features[N_SAMPLES/2*(COLUMNAS-1)-1:0], 
+                            input bit [31:0] labels[N_SAMPLES-1:0]);
 
         logic[31:0] sum = 0;
         logic[31:0] leaf_value;
@@ -235,12 +263,12 @@ class agent_esp_acc;
                 end
             end
     
-            predictions[p] = best;            
+            predictions_sw[p] = best;            
         end
 
         // Imprime los resultados
         for (int p = 0; p < 10000; ++p) begin
-            if (labels[p] == predictions[p]) begin
+            if (labels[p] == predictions_sw[p]) begin
                 correct++;
             end
         end

@@ -1,27 +1,24 @@
 `include "agent_acc_esp.sv"
 `timescale 1us/1ns
 
-module tb_rtl_trees;
+module tb_esp_trees;
     
     const integer t_clk    = 10;    // Clock period 100MHz
 
-
-    parameter N_NODES = 256;        // Number of nodes in each tree
-    parameter N_TREES = 128;        // Number of trees in the forest
+    parameter N_TREES          					= 128;
+    parameter N_NODES         					= 256;
+    parameter N_FEATURE        					= 32;
+    parameter MAX_BURST        					= 64;
 
     parameter N_SAMPLES = 10000;    // Number of samples
     parameter COLUMNAS = 33;        // 32 features + 1 label
 
     parameter N_64_FEATURES = N_SAMPLES/2*(COLUMNAS-1);
-  
+
     bit [63:0] trees            [N_TREES*N_NODES-1:0];
     bit [63:0] features_mem_64  [N_64_FEATURES-1:0];
     bit [31:0] labels_mem       [N_SAMPLES-1:0];
     bit [31:0] predictions      [N_SAMPLES-1:0];
-
-    bit [31:0] load_trees;
-    bit [31:0] n_features;
-    bit [31:0] n_samples;
 
     bit error_acc;
 
@@ -29,16 +26,17 @@ module tb_rtl_trees;
 
     agent_esp_acc agent_esp_acc_inst;
 
-    rtl_trees #(
-        .MAX_SAMPLES(N_SAMPLES),
-        .N_TREES(N_TREES),
-        .TREES_LEN(N_NODES)
-    )rtl_trees_inst(
+    esp_trees #(
+	    .N_TREES(N_TREES),
+	    .N_NODE_AND_LEAFS(N_NODES),
+	    .N_FEATURE(N_FEATURE),
+	    .MAX_BURST(MAX_BURST)
+    )esp_trees_inst(
         .clk(esp_acc_if_inst.clk),
         .rst_n(esp_acc_if_inst.rst),
         .load_trees(esp_acc_if_inst.load_trees),
         .n_features(esp_acc_if_inst.n_features),
-        .n_samples(esp_acc_if_inst.n_samples),
+        .burst_len(esp_acc_if_inst.burst_len),
         .conf_done(esp_acc_if_inst.conf_done),
         .acc_done(esp_acc_if_inst.acc_done),
         .debug(esp_acc_if_inst.debug),
@@ -135,43 +133,59 @@ module tb_rtl_trees;
         $fclose(file);
     endtask
 
+    // Clock generation 
     initial begin
         esp_acc_if_inst.clk = 0;
         forever #(t_clk/2) esp_acc_if_inst.clk = 
                     ~esp_acc_if_inst.clk;
     end
 
+    // Reset generation and initialization
     initial begin
         agent_esp_acc_inst = new(esp_acc_if_inst);
-        esp_acc_if_inst.rst = 0;
+        // Read the trees and features from files
+        read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
+        read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec_shuffled.dat", features_mem_64, labels_mem);        esp_acc_if_inst.rst = 0;
         #100 @(posedge esp_acc_if_inst.clk);
         esp_acc_if_inst.rst = 1;
         @(posedge esp_acc_if_inst.clk);
     end
 
     initial begin
+        int data_processed;
+        int offset_processed;
+        int samples_2_process;
+        int load_length;
         @(posedge esp_acc_if_inst.rst);
-
-        // Read the trees and features from files
-        read_trees("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/model_caracterizacion_frec.dat", trees);
-        read_features("/home/rodrigo/Documents/ESP_PHD/rtl_trees_acc/dataset_caracterizacion_frec.dat", features_mem_64, labels_mem);
-        // agent_esp_acc_inst.gold_gen(
-        //     trees,
-        //     COLUMNAS-1,
-        //     features_mem_64,
-        //     labels_mem,
-        //     predictions
-        // );
+        agent_esp_acc_inst.gold_gen(
+            trees,
+            COLUMNAS-1,
+            features_mem_64,
+            labels_mem
+        );
 
         // Load the trees into the RTL module
-        agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, trees);
+        agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, 0, trees);
         agent_esp_acc_inst.run(1, 0, 0);
-        
-        // Load the features into the RTL module
-        agent_esp_acc_inst.load_memory(0, N_64_FEATURES, features_mem_64);
-        agent_esp_acc_inst.run(0, 32, N_SAMPLES);
 
-        $finish;
+        while (data_processed < N_SAMPLES) begin
+            samples_2_process = $urandom_range(1, MAX_BURST);
+            if ((data_processed + samples_2_process) >= N_SAMPLES) begin
+                samples_2_process = N_SAMPLES - data_processed;
+            end
+            $display("Data processed: %0d, Samples to process: %0d", data_processed, samples_2_process);
+            // Load the features into the RTL module
+            load_length = samples_2_process * (COLUMNAS-1)/2; // 2 features per beat
+            agent_esp_acc_inst.load_memory(0, load_length, offset_processed, features_mem_64);
+            // Run the RTL module with the features
+            agent_esp_acc_inst.run(0, N_FEATURE, samples_2_process);
+            data_processed += samples_2_process;
+            offset_processed += load_length;
+        end
+
+        agent_esp_acc_inst.print_metrics(labels_mem);
+
+        $stop;
 
     end
 

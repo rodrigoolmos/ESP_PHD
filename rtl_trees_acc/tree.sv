@@ -1,6 +1,6 @@
 module tree #(
-    parameter int N_NODE_AND_LEAFS = 256,
-    parameter int N_FEATURE        = 32
+    parameter N_NODE_AND_LEAFS = 256,
+    parameter N_FEATURE        = 32
 ) (
     input  logic                                    clk,
     input  logic                                    rst_n,
