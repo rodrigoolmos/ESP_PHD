@@ -17,12 +17,12 @@ module tree #(
     tree_state tree_st;
 
     typedef struct packed {
-        logic signed [31:0]     value;
+        logic signed [31:0]     value;                  // Value for leaf (0) or threshold for node (1)
         logic [7:0]             padding2;
         logic [7:0]             next_node_right_index;
         logic [7:0]             f_index;
         logic [6:0]             padding1;
-        logic                   leaf_or_node;
+        logic                   leaf_or_node;           // 0 for leaf, 1 for node
     } tree_camps_t;
 
     tree_camps_t camps;

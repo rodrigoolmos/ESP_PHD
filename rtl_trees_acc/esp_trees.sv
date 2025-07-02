@@ -133,7 +133,9 @@ module esp_trees #(
 						state                     <= DMA_READ;
 					end
 				end
-
+				// DMA_READ state handles reading features or trees
+				// If load_trees[0] is set, it reads trees; otherwise,
+				// it reads features.
 				DMA_READ: begin
 					start <= 0;
 					if (dma_read_ctrl_valid && dma_read_ctrl_ready)
@@ -152,7 +154,7 @@ module esp_trees #(
 						end
 					end
 				end
-
+				
 				COMPUTE: begin
 					start <= 0;
 					if (load_trees[0]) begin

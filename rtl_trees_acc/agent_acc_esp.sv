@@ -64,7 +64,7 @@ class agent_esp_acc;
     int predictions_count = 0;
     int mismatches_count = 0;
 
-    // Simulated memory array
+    // Simulated memory array accessed by the DMA
     bit [63:0] mem[*];
 
     // Constructor: bind the interface and reset relevant signals
@@ -142,14 +142,15 @@ class agent_esp_acc;
         $display("Mismatches hw, sw: %0d", mismatches_count);
     endfunction
 
-    // Drive the full accelerator transaction
+    // Drive the full accelerator transaction emulating
+    // the ESP interface and handling DMA read/write operations
+    // emulation of the SW stack when using the accelerator
     task run(input int unsigned load_trees,
              input int unsigned burst_len);
 
         // CONFIG PHASE: apply registers
         esp_if.load_trees = load_trees;
         esp_if.burst_len = burst_len;
-        //////////////////////////////
         @(posedge esp_if.clk);
         esp_if.conf_done      = 1;
         @(posedge esp_if.clk);

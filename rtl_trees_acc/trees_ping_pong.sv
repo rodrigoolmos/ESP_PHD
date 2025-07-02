@@ -197,12 +197,20 @@ module trees_ping_pong #(
 						proc_st <= P_PING;
 						start_set <= 1;
 						c_ping_ready <= 0;
+						/* 
+						Each 64-bit word in features_ping contains two 32-bit features;
+						the assignment to features_mux splits them to feed the tree ensemble.
+						*/
 						features_mux <= features_ping;
 					end
 					if (p_pong_ready && !p_ping_pong) begin
 						proc_st <= P_PONG;
 						start_set <= 1;
 						c_pong_ready <= 0;
+						/* 
+						Each 64-bit word in features_ping contains two 32-bit features;
+						the assignment to features_mux splits them to feed the tree ensemble.
+						*/
 						features_mux <= features_pong;
 					end
 					if (prediction_index == burst_len) begin

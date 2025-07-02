@@ -52,7 +52,7 @@ module trees #(
     	  		.clk           (clk),
     	  		.rst_n         (rst_n),
     	  		.start         (start),
-    	  		.feature       (features[feature_idx[t]]),
+    	  		.feature       (features[feature_idx[t]]),		// multiplexed feature input
     	  		.feature_index (feature_idx[t]),
     	  		.node          (tree_mem[t][node_idx[t]]),
     	  		.node_index    (node_idx[t]),
@@ -143,6 +143,5 @@ module trees #(
 	    	endcase
 	  end
 	end
-
 
 endmodule
