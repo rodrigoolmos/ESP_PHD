@@ -35,7 +35,6 @@ module tb_esp_trees;
         .clk(esp_acc_if_inst.clk),
         .rst_n(esp_acc_if_inst.rst),
         .load_trees(esp_acc_if_inst.load_trees),
-        .n_features(esp_acc_if_inst.n_features),
         .burst_len(esp_acc_if_inst.burst_len),
         .conf_done(esp_acc_if_inst.conf_done),
         .acc_done(esp_acc_if_inst.acc_done),
@@ -166,7 +165,7 @@ module tb_esp_trees;
 
         // Load the trees into the RTL module
         agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, 0, trees);
-        agent_esp_acc_inst.run(1, 0, 0);
+        agent_esp_acc_inst.run(1, 0);
 
         while (data_processed < N_SAMPLES) begin
             samples_2_process = $urandom_range(1, MAX_BURST);
@@ -178,7 +177,7 @@ module tb_esp_trees;
             load_length = samples_2_process * (COLUMNAS-1)/2; // 2 features per beat
             agent_esp_acc_inst.load_memory(0, load_length, offset_processed, features_mem_64);
             // Run the RTL module with the features
-            agent_esp_acc_inst.run(0, N_FEATURE, samples_2_process);
+            agent_esp_acc_inst.run(0, samples_2_process);
             data_processed += samples_2_process;
             offset_processed += load_length;
         end

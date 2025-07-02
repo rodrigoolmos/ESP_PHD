@@ -11,7 +11,6 @@ module esp_trees #(
 
 	// Configuration
 	input  logic [31:0] load_trees,
-	input  logic [31:0] n_features,
 	input  logic [31:0] burst_len,
 	input  logic        conf_done,
 
@@ -126,7 +125,7 @@ module esp_trees #(
 						if (load_trees[0])
 							dma_read_ctrl_data_length <= N_TREES * N_NODE_AND_LEAFS;
 						else begin
-							dma_read_ctrl_data_length <= (burst_len * n_features + 1) >> 1; // FEATURES COME IN PAIRS
+							dma_read_ctrl_data_length <= (burst_len * N_FEATURE + 1) >> 1; // FEATURES COME IN PAIRS
 						end
 						dma_read_ctrl_data_size   <= 3'b011;
 						dma_read_ctrl_data_user   <= 0;
@@ -145,7 +144,7 @@ module esp_trees #(
 					if (dma_read_chnl_valid && dma_read_chnl_ready) begin
 						rd_ptr <= rd_ptr + 1;
 						if (rd_ptr == dma_read_ctrl_data_length - 1) begin
-							start <= !load_trees[0]; // Start computation only if not loading trees
+							start <= !load_trees[0]; 						// Start computation only if not loading trees
 							dma_read_chnl_ready <= 0;
 							rd_ptr <= 0;
 							state  <= COMPUTE;

@@ -4,23 +4,23 @@ module trees_ping_pong #(
 	parameter N_FEATURE        					= 32,
 	parameter MAX_BURST        					= 5000
 )(
-    input  logic                                    clk,
-    input  logic                                    rst_n,
-    input  logic                                    start,
+    input  logic                                    	clk,
+    input  logic                                    	rst_n,
+    input  logic                                    	start,
 
-    input  logic                                    load_trees,
-    input  logic [$clog2(N_NODE_AND_LEAFS)-1:0]     n_node,
-    input  logic [$clog2(N_TREES)-1:0]              n_tree,
-    input  logic [63:0]                             tree_nodes,
+    input  logic                                    	load_trees,
+    input  logic [$clog2(N_NODE_AND_LEAFS)-1:0]     	n_node,
+    input  logic [$clog2(N_TREES)-1:0]              	n_tree,
+    input  logic [63:0]                             	tree_nodes,
 
-    input  logic                                    load_features,
-    input  logic [$clog2(MAX_BURST*N_FEATURE)-1:0]	feature_addr,
-    input  logic [$clog2(MAX_BURST)-1:0]     		burst_len,
-    input  logic [63:0]                             features2,
+    input  logic                                   		load_features,
+    input  logic [$clog2(MAX_BURST*N_FEATURE/2)-1:0]	feature_addr,
+    input  logic [$clog2(MAX_BURST):0]     				burst_len,
+    input  logic [63:0]                             	features2,
 
-    output logic [63:0]								prediction,
-    input  logic [$clog2(MAX_BURST)-1:0]			prediction_addr,
-    output logic									done
+    output logic [63:0]									prediction,
+    input  logic [$clog2(MAX_BURST):0]					prediction_addr,
+    output logic										done
 );
 
 	localparam HALF_N_FEATURE     = N_FEATURE/2;
@@ -35,29 +35,29 @@ module trees_ping_pong #(
 	logic [63:0] 					prediction_mem [(MAX_BURST-1)/8:0];
     logic [7:0]                    	prediction_set;
     logic [7:0][7:0]                prediction_packed;
-	logic [MAX_BURST_BITS-1:0] 		prediction_index;
+	logic [MAX_BURST_BITS:0] 		prediction_index;
 
 
 
-	logic [63:0] 					features_mem [MAX_BURST*N_FEATURE-1:0];
-	logic [N_FEATURE-1:0][31:0] 	features_mux;
-	logic [N_FEATURE/2-1:0][63:0] 	features_ping;
-	logic [N_FEATURE/2-1:0][63:0] 	features_pong;
-	logic [$clog2(N_FEATURE)-1:0] 	feature_index;
-	logic [MAX_BURST_BITS-1:0] 		burst_index;
+	logic [63:0] 						features_mem [MAX_BURST*HALF_N_FEATURE-1:0];
+	logic [N_FEATURE-1:0][31:0] 		features_mux;
+	logic [HALF_N_FEATURE-1:0][63:0] 	features_ping;
+	logic [HALF_N_FEATURE-1:0][63:0] 	features_pong;
+	logic [$clog2(N_FEATURE)-1:0] 		feature_index;
+	logic [31:0] 						burst_index;
 
-	logic 							c_ping_ready;
-	logic 							c_pong_ready;
-	logic 							c_ping_pong;
+	logic 								c_ping_ready;
+	logic 								c_pong_ready;
+	logic 								c_ping_pong;
 
-	logic 							p_ping_ready;
-	logic 							p_pong_ready;
-	logic 							p_ping_pong;
+	logic 								p_ping_ready;
+	logic 								p_pong_ready;
+	logic 								p_ping_pong;
 
-	logic 							start_set;
-	logic 							done_set;
+	logic 								start_set;
+	logic 								done_set;
 
-	logic							load_predictions;
+	logic								load_predictions;
 
     trees #(
         .N_TREES(N_TREES),

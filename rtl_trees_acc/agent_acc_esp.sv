@@ -5,7 +5,6 @@ interface esp_acc_if;
 
     // << User-defined configuration registers >>
     logic [31:0] load_trees;                // FLAG: load trees
-    logic [31:0] n_features;                // Number of features
     logic [31:0] burst_len;                 // Burst length
 
     logic conf_done;                        // One-cycle pulse indicating that configuration registers are valid
@@ -101,8 +100,11 @@ class agent_esp_acc;
                 $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
                 if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1]) begin
                     mismatches_count++;
-                    //$stop;
-                end            
+                    $display("Mismatch at prediction %0d: expected %0h, got %0h", 
+                             predictions_count-1, predictions_sw[predictions_count-1], 
+                             predictions_hw[predictions_count-1]);
+                    $stop;
+                end
             end
         end
         for (j=0; j<n_predictions%8; ++j) begin
@@ -110,7 +112,10 @@ class agent_esp_acc;
             $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
             if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1]) begin
                 mismatches_count++;
-                //$stop;
+                $display("Mismatch at prediction %0d: expected %0h, got %0h", 
+                         predictions_count-1, predictions_sw[predictions_count-1], 
+                         predictions_hw[predictions_count-1]);
+                $stop;
             end
         end
     endtask
@@ -139,12 +144,10 @@ class agent_esp_acc;
 
     // Drive the full accelerator transaction
     task run(input int unsigned load_trees,
-             input int unsigned n_features,
              input int unsigned burst_len);
 
         // CONFIG PHASE: apply registers
         esp_if.load_trees = load_trees;
-        esp_if.n_features = n_features;
         esp_if.burst_len = burst_len;
         //////////////////////////////
         @(posedge esp_if.clk);
@@ -222,7 +225,7 @@ class agent_esp_acc;
             for (int c=0; c<32; ++c)
                 counts[c] = 0;
 
-                for (int t = 0; t < N_TREES; t++) begin
+            for (int t = 0; t < N_TREES; t++) begin
                 node_index = 0;
     
                 while(1) begin
@@ -250,7 +253,7 @@ class agent_esp_acc;
                 if (leaf_value >= 0 && leaf_value < 32)
                     counts[leaf_value]++;
     
-                end
+            end
     
             // Busca la clase ganadora
             best      = 0;
@@ -263,7 +266,8 @@ class agent_esp_acc;
                 end
             end
     
-            predictions_sw[p] = best;            
+            predictions_sw[p] = best;
+            $display("Prediction %0d: %0h", p, predictions_sw[p]);
         end
 
         // Imprime los resultados
