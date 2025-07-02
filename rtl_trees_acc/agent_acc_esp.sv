@@ -139,7 +139,7 @@ class agent_esp_acc;
 
         $display("Correct predictions hw: %0d of %0d", correct, 10000);
         $display("Accuracy: %f", (correct / 10000.0));
-        $display("Mismatches: %0d", mismatches_count);
+        $display("Mismatches hw, sw: %0d", mismatches_count);
     endfunction
 
     // Drive the full accelerator transaction
