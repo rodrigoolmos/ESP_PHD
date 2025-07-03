@@ -26,19 +26,18 @@ module tb_esp_trees;
 
     agent_esp_acc agent_esp_acc_inst;
 
-    esp_trees #(
+    trees_rtl_basic_dma64 #(
 	    .N_TREES(N_TREES),
 	    .N_NODE_AND_LEAFS(N_NODES),
 	    .N_FEATURE(N_FEATURE),
 	    .MAX_BURST(MAX_BURST)
-    )esp_trees_inst(
+    )trees_rtl_basic_dma64_inst(
         .clk(esp_acc_if_inst.clk),
-        .rst_n(esp_acc_if_inst.rst),
-        .load_trees(esp_acc_if_inst.load_trees),
-        .burst_len(esp_acc_if_inst.burst_len),
+        .rst(esp_acc_if_inst.rst),
+        .conf_info_load_trees(esp_acc_if_inst.conf_info_load_trees),
+        .conf_info_burst_len(esp_acc_if_inst.conf_info_burst_len),
         .conf_done(esp_acc_if_inst.conf_done),
         .acc_done(esp_acc_if_inst.acc_done),
-        .debug(esp_acc_if_inst.debug),
         .dma_read_ctrl_ready(esp_acc_if_inst.dma_read_ctrl_ready),
         .dma_read_ctrl_valid(esp_acc_if_inst.dma_read_ctrl_valid),
         .dma_read_ctrl_data_index(esp_acc_if_inst.dma_read_ctrl_data_index),

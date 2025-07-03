@@ -4,13 +4,12 @@ interface esp_acc_if;
     logic rst;                              // Active-low synchronous reset signal (provided by ESP socket)
 
     // << User-defined configuration registers >>
-    logic [31:0] load_trees;                // FLAG: load trees
-    logic [31:0] burst_len;                 // Burst length
+    logic [31:0] conf_info_load_trees;      // FLAG: load trees
+    logic [31:0] conf_info_burst_len;       // Burst length
 
     logic conf_done;                        // One-cycle pulse indicating that configuration registers are valid
 
     logic acc_done;                         // One-cycle pulse from the accelerator indicating completion
-    logic [31:0] debug;                     // Optional debug output (e.g., error codes, FSM state)
 
     // DMA Read Control – signals for initiating a DMA read transaction
     logic dma_read_ctrl_ready;              // From socket: high when ready to accept a new read request
@@ -149,8 +148,8 @@ class agent_esp_acc;
              input int unsigned burst_len);
 
         // CONFIG PHASE: apply registers
-        esp_if.load_trees = load_trees;
-        esp_if.burst_len = burst_len;
+        esp_if.conf_info_load_trees = load_trees;
+        esp_if.conf_info_burst_len = burst_len;
         @(posedge esp_if.clk);
         esp_if.conf_done      = 1;
         @(posedge esp_if.clk);

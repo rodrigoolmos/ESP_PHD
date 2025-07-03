@@ -1,147 +1,157 @@
 module trees #(
-  	parameter N_TREES          = 16,
-  	parameter N_NODE_AND_LEAFS = 256,
-  	parameter N_FEATURE        = 32
+	parameter int N_TREES          = 16,
+	parameter int N_NODE_AND_LEAFS = 256,
+	parameter int N_FEATURE        = 32
 )(
-	input  logic                                    clk,
-	input  logic                                    rst_n,
-	input  logic                                    start,
+	input  logic                          		clk,
+	input  logic                          		rst_n,
+	input  logic                          		start,
 
-	input  logic                                    load_trees,
-	input  logic [$clog2(N_NODE_AND_LEAFS)-1:0]     n_node,
-	input  logic [$clog2(N_TREES)-1:0]              n_tree,
-	input  logic [63:0]                             tree_nodes,
+	// Port para carga de nodos
+	input  logic                          		load_trees,
+	input  logic [$clog2(N_NODE_AND_LEAFS)-1:0] n_node,
+	input  logic [$clog2(N_TREES)-1:0]         	n_tree,
+	input  logic [63:0]                   		tree_nodes,
 
-	input  logic [N_FEATURE-1:0][31:0]              features,
+	// Características de entrada
+	input  logic [N_FEATURE-1:0][31:0]    		features,
 
-	output logic [7:0]                       		prediction,
-	output logic                                    done
+	// Salida final
+	output logic [7:0]                    		prediction,
+	output logic                          		done,
+	output logic                          		idle_sys
 );
 
-	localparam FEAT_IDX_W       = $clog2(N_FEATURE);
-	localparam CNT_W            = $clog2(N_TREES+1);
-	localparam N_NODE_W         = $clog2(N_NODE_AND_LEAFS);
+	// ----------------------------------------------------------------
+	//  Anchos internos
+	// ----------------------------------------------------------------
+	localparam int FEAT_IDX_W = $clog2(N_FEATURE);
+	localparam int CNT_W      = $clog2(N_TREES+1);
+	localparam int N_NODE_W   = $clog2(N_NODE_AND_LEAFS);
 
-	// ---------------------------------------------------
-	//  Feature and tree memory
-	// ---------------------------------------------------
-	logic [63:0]                      tree_mem   [N_TREES-1:0][N_NODE_AND_LEAFS-1:0];
+	// ----------------------------------------------------------------
+	//  Señales para el ensamble de árboles
+	// ----------------------------------------------------------------
+	logic [31:0]               leaf_vals   [0:N_TREES-1];
+	logic [N_TREES-1:0]        tree_done;
+	logic [FEAT_IDX_W-1:0]     feature_idx [0:N_TREES-1];
+	logic [N_NODE_W-1:0]       node_idx    [0:N_TREES-1];
 
-	logic [31:0]                      leaf_vals  [N_TREES-1:0];
-	logic [N_TREES-1:0]               tree_done;
+	// ----------------------------------------------------------------
+	//  Contadores para votación
+	// ----------------------------------------------------------------
+	logic [CNT_W-1:0]          voted_trees  [0:N_FEATURE-1];
+	logic [CNT_W-1:0]          tmp_voted;
+	logic [7:0]                value_pred;
+	logic [CNT_W-1:0]          cnt_trees;
+	logic [FEAT_IDX_W-1:0]     cnt_vote;
 
-	logic [FEAT_IDX_W-1:0]            feature_idx [N_TREES-1:0];
-	logic [N_NODE_W-1:0]              node_idx [N_TREES-1:0];
+	// FSM de control de votación
+	typedef enum logic [1:0] { VS_IDLE, VS_COUNT, VS_VOTE, VS_SELECT } vote_st_t;
+	vote_st_t vote_st;
+	logic     start_ff;
 
-	logic [CNT_W-1:0]                 voted_features [N_FEATURE-1:0];
-	logic [CNT_W-1:0]                 tmp_voted;
-	logic [CNT_W-1:0]                 voted_features_ff [N_FEATURE-1:0];
-	logic [7:0]            			  value_prediction;
-	logic                             start_ff;
-
-	// ---------------------------------------------------
-	//  N_TREES engine instances
-	// ---------------------------------------------------
+	// ----------------------------------------------------------------
+	//  Instanciación de N_TREES BRAMs y motores tree
+	// ----------------------------------------------------------------
 	genvar t;
 	generate
-    	for (t = 0; t < N_TREES; t++) begin
-    	  	tree #(
-    	  		.N_NODE_AND_LEAFS(N_NODE_AND_LEAFS),
-    	  		.N_FEATURE(N_FEATURE)
-    	  	) tree_u (
-    	  		.clk           (clk),
-    	  		.rst_n         (rst_n),
-    	  		.start         (start),
-    	  		.feature       (features[feature_idx[t]]),		// multiplexed feature input
-    	  		.feature_index (feature_idx[t]),
-    	  		.node          (tree_mem[t][node_idx[t]]),
-    	  		.node_index    (node_idx[t]),
-    	  		.leaf_value    (leaf_vals[t]),
-    	  		.done          (tree_done[t])
-    	  	);
-    	end
-  	endgenerate
+		for (t = 0; t < N_TREES; t++) begin : GEN_TREES
+			// Cada árbol tiene su BRAM individual inferida
+			(* ram_style = "block" *)
+			logic [63:0] tree_mem_t [0:N_NODE_AND_LEAFS-1];
 
-  	typedef enum logic [1:0] { IDLE, COUNT, SELECT } vote_st_t;
-  	vote_st_t vote_st;
+			// Dato leído registrado
+			logic [63:0] tree_node_q;
 
-  	// ---------------------------------------------------
-  	//  LOAD TREES AND FEATURES
-  	// ---------------------------------------------------
-  	always_ff @(posedge clk) begin
-    	if (load_trees) begin
-    	  	tree_mem[n_tree][n_node] <= tree_nodes;
-    	end
-  	end
-
-	// ---------------------------------------------------
-	//  VOTE PROCESS
-	// ---------------------------------------------------
-	always_comb begin
-		for (int i = 0; i < N_FEATURE; i = i + 1) begin
-			voted_features[i] = 0;
+			// Escritura y lectura síncronas en un solo always_ff
+			always_ff @(posedge clk) begin
+				// Escritura de nodos
+				if (load_trees && (n_tree == t))
+				  	tree_mem_t[n_node] <= tree_nodes;
+			end
+		    
+		  	always_comb tree_node_q <= tree_mem_t[ node_idx[t] ];
+		  
+		    
+			// Instancia del árbol de decisión
+			tree #(
+				.N_NODE_AND_LEAFS(N_NODE_AND_LEAFS),
+				.N_FEATURE       (N_FEATURE)
+			) tree_u (
+				.clk           (clk),
+				.rst_n         (rst_n),
+				.start         (start),
+				.feature       (features[ feature_idx[t] ]),
+				.feature_index (feature_idx[t]),
+				.node          (tree_node_q),
+				.node_index    (node_idx[t]),
+				.leaf_value    (leaf_vals[t]),
+				.done          (tree_done[t])
+			);
 		end
-		for (int i = 0; i < N_TREES; i = i + 1) begin
-			voted_features[ leaf_vals[i] ]++;
-		end
-	end
+	endgenerate
 
+	// ----------------------------------------------------------------
+	//  FSM de salida: combinar done y generar prediction
+	// ----------------------------------------------------------------
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			for (int i = 0; i < N_FEATURE; i = i + 1) begin
-				voted_features_ff[i] <= 0;
-			end
+			for (int i = 0; i < N_FEATURE; i++)
+				voted_trees[i] <= 0;
+			value_pred   <= 0;      
+			tmp_voted    <= 0;
+			cnt_trees    <= 0;
+			cnt_vote     <= 0;
+			start_ff     <= 0;
+			vote_st      <= VS_IDLE;
+			done         <= 0;
+			idle_sys	 <= 1;
 		end else begin
-			for (int i = 0; i < N_FEATURE; i = i + 1) begin
-				voted_features_ff[i] <= voted_features[i];
+			case (vote_st)
+			VS_IDLE: begin
+				done         <= 0;
+				cnt_trees    <= 0;
+				idle_sys	 <= 1;
+				for (int i = 0; i < N_FEATURE; i++)
+					voted_trees[i] <=0;
+				if (start)
+					start_ff   <= 1;
+				if (start_ff && &tree_done) begin
+					idle_sys	 <= 0;
+					vote_st    <= VS_COUNT;
+				end
 			end
-		end    
-	end
 
-	always_comb begin
-		tmp_voted        = voted_features_ff[0];
-		value_prediction = 0;
-		for (int i = 1; i < N_FEATURE; i = i + 1) begin
-			if (voted_features_ff[i] > tmp_voted) begin
-				tmp_voted        = voted_features_ff[i];
-				value_prediction = i;
+			VS_COUNT: begin
+				voted_trees[leaf_vals[cnt_trees]] <= voted_trees[leaf_vals[cnt_trees]] + 1;
+				cnt_trees    <= cnt_trees + 1;
+				if (cnt_trees == N_TREES-1) begin
+					vote_st    <= VS_VOTE;
+					tmp_voted   <= 0;
+					cnt_vote    <= 0;
+				end
 			end
+
+			VS_VOTE: begin
+				cnt_vote <= cnt_vote + 1;
+				if (voted_trees[cnt_vote] > tmp_voted) begin
+					tmp_voted   <= voted_trees[cnt_vote];
+					value_pred  <= cnt_vote;
+				end
+				if (cnt_vote == N_FEATURE-1) begin
+					vote_st    <= VS_SELECT;
+				end
+			end
+
+			VS_SELECT: begin
+				start_ff     <= 0;
+				prediction   <= value_pred;
+				done         <= 1;
+				vote_st      <= VS_IDLE;
+			end
+			endcase
 		end
-	end
-
-
-	always_ff @(posedge clk or negedge rst_n) begin
-		if (!rst_n) begin
-			prediction <= 0;
-			done <= 0;
-			start_ff <= 0;
-			vote_st <= IDLE;
-		end else begin
-	    	case (vote_st)
-
-	    		IDLE: begin
-	    			if (start) begin
-	    				start_ff <= 1;
-	    			end
-	    			done <= 0;
-	    			if (start_ff && &tree_done) begin
-	    				vote_st <= COUNT;
-	    			end
-	    		end
-
-				COUNT: begin
-					vote_st <= SELECT;
-				end
-
-				SELECT: begin
-					start_ff <= 0;
-					prediction <= value_prediction;
-					done <= 1;
-					vote_st <= IDLE;
-				end
-
-	    	endcase
-	  end
 	end
 
 endmodule

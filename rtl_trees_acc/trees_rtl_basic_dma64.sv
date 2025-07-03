@@ -1,22 +1,19 @@
-`timescale 1us/1ns
-
-module esp_trees #(
-	parameter N_TREES          					= 16,
+module trees_rtl_basic_dma64 #(
+	parameter N_TREES          					= 128,
 	parameter N_NODE_AND_LEAFS 					= 256,		// POWER OF 2
 	parameter N_FEATURE        					= 32,
 	parameter MAX_BURST        					= 5000
 ) (
 	input  logic        clk,
-	input  logic        rst_n,                          // Active-low reset
+	input  logic        rst,                          // Active-low reset
 
 	// Configuration
-	input  logic [31:0] load_trees,
-	input  logic [31:0] burst_len,
+	input  logic [31:0] conf_info_load_trees,
+	input  logic [31:0] conf_info_burst_len,
 	input  logic        conf_done,
 
 	// Accelerator status
 	output logic        acc_done,
-	output logic [31:0] debug,
 
 	// DMA read control
 	input  logic        dma_read_ctrl_ready,
@@ -75,7 +72,7 @@ module esp_trees #(
 		.MAX_BURST(MAX_BURST)
 	) trees_ping_pong_ins (
 		.clk(clk),
-		.rst_n(rst_n),
+		.rst_n(rst),
 		.start(start),
 		
 		.load_trees(load_trees_s),
@@ -85,7 +82,7 @@ module esp_trees #(
 
 		.load_features(load_features),
 		.feature_addr(rd_ptr),
-		.burst_len(burst_len),
+		.burst_len(conf_info_burst_len),
 		.features2(dma_read_chnl_data),
 
 		.prediction(prediction),
@@ -93,8 +90,8 @@ module esp_trees #(
 		.done(end_compute)
 	);
 
-	always_ff @(posedge clk or negedge rst_n) begin
-		if (!rst_n) begin
+	always_ff @(posedge clk or negedge rst) begin
+		if (!rst) begin
 			state                   	<= IDLE;
 			dma_read_ctrl_valid     	<= 0;
 			dma_read_ctrl_data_index 	<= 0;
@@ -122,10 +119,10 @@ module esp_trees #(
 					if (conf_done) begin
 						dma_read_ctrl_valid       <= 1;
 						dma_read_ctrl_data_index  <= 0;
-						if (load_trees[0])
+						if (conf_info_load_trees[0])
 							dma_read_ctrl_data_length <= N_TREES * N_NODE_AND_LEAFS;
 						else begin
-							dma_read_ctrl_data_length <= (burst_len * N_FEATURE + 1) >> 1; // FEATURES COME IN PAIRS
+							dma_read_ctrl_data_length <= (conf_info_burst_len * N_FEATURE + 1) >> 1; // FEATURES COME IN PAIRS
 						end
 						dma_read_ctrl_data_size   <= 3'b011;
 						dma_read_ctrl_data_user   <= 0;
@@ -134,19 +131,19 @@ module esp_trees #(
 					end
 				end
 				// DMA_READ state handles reading features or trees
-				// If load_trees[0] is set, it reads trees; otherwise,
+				// If conf_info_load_trees[0] is set, it reads trees; otherwise,
 				// it reads features.
 				DMA_READ: begin
 					start <= 0;
 					if (dma_read_ctrl_valid && dma_read_ctrl_ready)
 						dma_read_ctrl_valid <= 0;
-					if(!load_trees[0]) 
+					if(!conf_info_load_trees[0]) 
 						load_features <= 1;
 
 					if (dma_read_chnl_valid && dma_read_chnl_ready) begin
 						rd_ptr <= rd_ptr + 1;
 						if (rd_ptr == dma_read_ctrl_data_length - 1) begin
-							start <= !load_trees[0]; 						// Start computation only if not loading trees
+							start <= !conf_info_load_trees[0]; 						// Start computation only if not loading trees
 							dma_read_chnl_ready <= 0;
 							rd_ptr <= 0;
 							state  <= COMPUTE;
@@ -157,7 +154,7 @@ module esp_trees #(
 				
 				COMPUTE: begin
 					start <= 0;
-					if (load_trees[0]) begin
+					if (conf_info_load_trees[0]) begin
 						dma_write_ctrl_valid       <= 1;
 						dma_write_ctrl_data_index  <= 0;
 						dma_write_ctrl_data_length <= 1;
@@ -167,7 +164,7 @@ module esp_trees #(
 					end else if (end_compute) begin
 						dma_write_ctrl_valid       <= 1;
 						dma_write_ctrl_data_index  <= 0;
-						dma_write_ctrl_data_length <= (burst_len + 7) >> 3; //ceil(x / 8)
+						dma_write_ctrl_data_length <= (conf_info_burst_len + 7) >> 3; //ceil(x / 8)
 						dma_write_ctrl_data_size   <= 3'b011;
 						dma_write_ctrl_data_user   <= 0;
 						state                      <= DMA_WRITE;
@@ -205,12 +202,11 @@ module esp_trees #(
 	end
 
 	always_comb dma_write_chnl_valid = writing;
-	always_comb debug = {29'd0, state};
-	always_comb load_trees_s = state == DMA_READ ? load_trees[0] : 0;
+	always_comb load_trees_s = state == DMA_READ ? conf_info_load_trees[0] : 0;
 
 	always_comb begin
 		if (state == DMA_WRITE) begin
-			if (load_trees[0])
+			if (conf_info_load_trees[0])
 				dma_write_chnl_data = 64'hDEAD_BEEF;
 			else
 				dma_write_chnl_data = prediction;

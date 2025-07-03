@@ -32,13 +32,14 @@ module trees_ping_pong #(
     typedef enum logic[1:0] { C_IDLE, C_PING, C_PONG, C_WAIT} copy_state;
 	copy_state copy_st;
 
+	(* ram_style = "block" *) 
 	logic [63:0] 					prediction_mem [(MAX_BURST-1)/8:0];
     logic [7:0]                    	prediction_set;
     logic [7:0][7:0]                prediction_packed;
 	logic [MAX_BURST_BITS:0] 		prediction_index;
 
 
-
+	(* ram_style = "block" *) 
 	logic [63:0] 						features_mem [MAX_BURST*HALF_N_FEATURE-1:0];
 	logic [N_FEATURE-1:0][31:0] 		features_mux;
 	logic [HALF_N_FEATURE-1:0][63:0] 	features_ping;
@@ -59,6 +60,8 @@ module trees_ping_pong #(
 
 	logic								load_predictions;
 
+	logic 								idle_sys;
+
     trees #(
         .N_TREES(N_TREES),
         .N_NODE_AND_LEAFS(N_NODE_AND_LEAFS),
@@ -76,20 +79,21 @@ module trees_ping_pong #(
         .features(features_mux),
 
         .prediction(prediction_set),
-        .done(done_set)
+        .done(done_set),
+		.idle_sys(idle_sys)
     );
 
 	// ---------------------------------------------------
 	//  LOAD FEATURES
 	// ---------------------------------------------------
-	always_ff @(posedge clk or negedge rst_n)
+	always_ff @(posedge clk)
     	if (load_features)
     	  	features_mem[feature_addr] <= features2;
 
 	// ---------------------------------------------------
 	//  LOAD PREDICTIONS
 	// ---------------------------------------------------
-	always_ff @(posedge clk or negedge rst_n)
+	always_ff @(posedge clk)
     	if (load_predictions)
 			prediction_mem[((prediction_index - 1) >> 3)] <= prediction_packed;
 
@@ -193,7 +197,8 @@ module trees_ping_pong #(
 				end
 				P_WAIT: begin
 					load_predictions <= 0;
-					if (p_ping_ready && p_ping_pong) begin
+					c_ping_ready <= idle_sys;
+					if (p_ping_ready && p_ping_pong && idle_sys) begin
 						proc_st <= P_PING;
 						start_set <= 1;
 						c_ping_ready <= 0;
@@ -203,7 +208,8 @@ module trees_ping_pong #(
 						*/
 						features_mux <= features_ping;
 					end
-					if (p_pong_ready && !p_ping_pong) begin
+					c_pong_ready <= idle_sys;
+					if (p_pong_ready && !p_ping_pong && idle_sys) begin
 						proc_st <= P_PONG;
 						start_set <= 1;
 						c_pong_ready <= 0;
