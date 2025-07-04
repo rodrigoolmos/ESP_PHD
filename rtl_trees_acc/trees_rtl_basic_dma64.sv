@@ -207,7 +207,7 @@ module trees_rtl_basic_dma64 #(
 	always_comb begin
 		if (state == DMA_WRITE) begin
 			if (conf_info_load_trees[0])
-				dma_write_chnl_data = 64'hDEAD_BEEF;
+				dma_write_chnl_data = 64'h524F445249474F2E;		 // "RODRIGO."
 			else
 				dma_write_chnl_data = prediction;
 		end else begin
