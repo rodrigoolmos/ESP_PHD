@@ -2,7 +2,8 @@ module trees #(
 	parameter int N_TREES          = 16,
 	parameter int N_NODE_AND_LEAFS = 256,
 	parameter int N_FEATURE        = 32,
-	parameter int N_CLASES         = 32
+	parameter int N_CLASES         = 32,
+	parameter int UNROLL	       = 8
 )(
 	input  logic                          		clk,
 	input  logic                          		rst_n,
@@ -42,7 +43,8 @@ module trees #(
 	// ----------------------------------------------------------------
 	//  Contadores para votación
 	// ----------------------------------------------------------------
-	logic [CNT_W-1:0]          voted_trees  [0:N_CLASES-1];
+	logic [CNT_W-1:0]          voted_trees  	[UNROLL-1:0][0:N_CLASES-1];
+	logic [CNT_W-1:0]          voted_trees_f  	[0:N_CLASES-1];
 	logic [CNT_W-1:0]          tmp_voted;
 	logic [7:0]                value_pred;
 	logic [CNT_W-1:0]          cnt_trees;
@@ -94,13 +96,22 @@ module trees #(
 		end
 	endgenerate
 
+	always_comb begin
+		for (int i = 0; i < N_CLASES; i++) begin
+			voted_trees_f[i] = 0;
+			for (int j = 0; j < UNROLL; j++)
+				voted_trees_f[i] += voted_trees[j][i];
+		end
+	end
+
 	// ----------------------------------------------------------------
 	//  FSM de salida: combinar done y generar prediction
 	// ----------------------------------------------------------------
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			for (int i = 0; i < N_CLASES; i++)
-				voted_trees[i] <= 0;
+			for (int j=0; j<UNROLL; ++j)
+				for (int i = 0; i < N_CLASES; i++)
+					voted_trees[j][i] <= 0;
 			value_pred   <= 0;      
 			tmp_voted    <= 0;
 			cnt_trees    <= 0;
@@ -115,8 +126,9 @@ module trees #(
 				done         <= 0;
 				cnt_trees    <= 0;
 				idle_sys	 <= 1;
-				for (int i = 0; i < N_CLASES; i++)
-					voted_trees[i] <=0;
+				for (int j=0; j<UNROLL; ++j)
+					for (int i = 0; i < N_CLASES; i++)
+						voted_trees[j][i] <= 0;
 				if (start)
 					start_ff   <= 1;
 				if (start_ff && &tree_done) begin
@@ -126,19 +138,25 @@ module trees #(
 			end
 
 			VS_COUNT: begin
-				voted_trees[leaf_vals[cnt_trees]] <= voted_trees[leaf_vals[cnt_trees]] + 1;
-				cnt_trees    <= cnt_trees + 1;
-				if (cnt_trees == N_TREES-1) begin
+				for (int j = 0; j < UNROLL; j++) begin
+					if (cnt_trees + j * (N_TREES / UNROLL) < N_TREES) begin
+						voted_trees[j][leaf_vals[cnt_trees + j * (N_TREES / UNROLL)]] <= 
+							voted_trees[j][leaf_vals[cnt_trees + j * (N_TREES / UNROLL)]] + 1;
+					end
+				end
+				cnt_trees <= cnt_trees + 1;
+				if (cnt_trees == (N_TREES / UNROLL) - 1) begin
+					cnt_vote   <= 0;
+					tmp_voted  <= 0;
+					value_pred <= 0;
 					vote_st    <= VS_VOTE;
-					tmp_voted   <= 0;
-					cnt_vote    <= 0;
 				end
 			end
 
 			VS_VOTE: begin
 				cnt_vote <= cnt_vote + 1;
-				if (voted_trees[cnt_vote] > tmp_voted) begin
-					tmp_voted   <= voted_trees[cnt_vote];
+				if (voted_trees_f[cnt_vote] > tmp_voted) begin
+					tmp_voted   <= voted_trees_f[cnt_vote];
 					value_pred  <= cnt_vote;
 				end
 				if (cnt_vote == N_CLASES-1) begin
