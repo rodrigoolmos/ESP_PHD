@@ -8,6 +8,7 @@ module tb_esp_trees;
     parameter N_TREES          					= 128;
     parameter N_NODES         					= 256;
     parameter N_FEATURE        					= 32;
+    parameter N_CLASES        					= 5;
     parameter MAX_BURST        					= 64;
 
     parameter N_SAMPLES = 10000;    // Number of samples
@@ -30,6 +31,7 @@ module tb_esp_trees;
 	    .N_TREES(N_TREES),
 	    .N_NODE_AND_LEAFS(N_NODES),
 	    .N_FEATURE(N_FEATURE),
+	    .N_CLASES(N_CLASES),
 	    .MAX_BURST(MAX_BURST)
     )trees_rtl_basic_dma64_inst(
         .clk(esp_acc_if_inst.clk),

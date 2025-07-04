@@ -2,6 +2,7 @@ module trees_rtl_basic_dma64 #(
 	parameter N_TREES          					= 128,
 	parameter N_NODE_AND_LEAFS 					= 256,		// POWER OF 2
 	parameter N_FEATURE        					= 32,
+	parameter N_CLASES  		       			= 32,
 	parameter MAX_BURST        					= 5000
 ) (
 	input  logic        clk,

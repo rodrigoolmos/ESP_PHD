@@ -1,7 +1,8 @@
 module trees #(
 	parameter int N_TREES          = 16,
 	parameter int N_NODE_AND_LEAFS = 256,
-	parameter int N_FEATURE        = 32
+	parameter int N_FEATURE        = 32,
+	parameter int N_CLASES         = 32
 )(
 	input  logic                          		clk,
 	input  logic                          		rst_n,
@@ -26,6 +27,7 @@ module trees #(
 	//  Anchos internos
 	// ----------------------------------------------------------------
 	localparam int FEAT_IDX_W = $clog2(N_FEATURE);
+	localparam int N_CLASES_W = $clog2(N_CLASES);
 	localparam int CNT_W      = $clog2(N_TREES+1);
 	localparam int N_NODE_W   = $clog2(N_NODE_AND_LEAFS);
 
@@ -40,11 +42,11 @@ module trees #(
 	// ----------------------------------------------------------------
 	//  Contadores para votación
 	// ----------------------------------------------------------------
-	logic [CNT_W-1:0]          voted_trees  [0:N_FEATURE-1];
+	logic [CNT_W-1:0]          voted_trees  [0:N_CLASES-1];
 	logic [CNT_W-1:0]          tmp_voted;
 	logic [7:0]                value_pred;
 	logic [CNT_W-1:0]          cnt_trees;
-	logic [FEAT_IDX_W-1:0]     cnt_vote;
+	logic [N_CLASES_W-1:0]     cnt_vote;
 
 	// FSM de control de votación
 	typedef enum logic [1:0] { VS_IDLE, VS_COUNT, VS_VOTE, VS_SELECT } vote_st_t;
@@ -97,7 +99,7 @@ module trees #(
 	// ----------------------------------------------------------------
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			for (int i = 0; i < N_FEATURE; i++)
+			for (int i = 0; i < N_CLASES; i++)
 				voted_trees[i] <= 0;
 			value_pred   <= 0;      
 			tmp_voted    <= 0;
@@ -113,7 +115,7 @@ module trees #(
 				done         <= 0;
 				cnt_trees    <= 0;
 				idle_sys	 <= 1;
-				for (int i = 0; i < N_FEATURE; i++)
+				for (int i = 0; i < N_CLASES; i++)
 					voted_trees[i] <=0;
 				if (start)
 					start_ff   <= 1;
@@ -139,7 +141,7 @@ module trees #(
 					tmp_voted   <= voted_trees[cnt_vote];
 					value_pred  <= cnt_vote;
 				end
-				if (cnt_vote == N_FEATURE-1) begin
+				if (cnt_vote == N_CLASES-1) begin
 					vote_st    <= VS_SELECT;
 				end
 			end
