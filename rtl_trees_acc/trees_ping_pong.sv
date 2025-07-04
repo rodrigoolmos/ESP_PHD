@@ -66,7 +66,8 @@ module trees_ping_pong #(
     trees #(
         .N_TREES(N_TREES),
         .N_NODE_AND_LEAFS(N_NODE_AND_LEAFS),
-        .N_FEATURE(N_FEATURE)
+        .N_FEATURE(N_FEATURE),
+	    .N_CLASES(N_CLASES)
 	)trees_u (
         .clk(clk),
         .rst_n(rst_n),

@@ -70,6 +70,7 @@ module trees_rtl_basic_dma64 #(
 		.N_TREES(N_TREES),
 		.N_NODE_AND_LEAFS(N_NODE_AND_LEAFS),
 		.N_FEATURE(N_FEATURE),
+	    .N_CLASES(N_CLASES),
 		.MAX_BURST(MAX_BURST)
 	) trees_ping_pong_ins (
 		.clk(clk),
