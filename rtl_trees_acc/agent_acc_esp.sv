@@ -147,6 +147,8 @@ class agent_esp_acc;
     task run(input int unsigned load_trees,
              input int unsigned burst_len);
 
+        bit [31:0] clk_stamp1, clk_stamp2; 
+
         // CONFIG PHASE: apply registers
         esp_if.conf_info_load_trees = load_trees;
         esp_if.conf_info_burst_len = burst_len;
@@ -184,10 +186,18 @@ class agent_esp_acc;
         // WRITE CHANNEL: capture returned data
         esp_if.dma_write_chnl_ready = 1;
         for (int i = 0; i < write_length; ) begin
-            @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
-            mem[write_index + i] = esp_if.dma_write_chnl_data;
+            if (i<write_length-1) begin
+                @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
+                mem[write_index + i] = esp_if.dma_write_chnl_data;
+            end else begin
+                // Last beat contains clock stamps
+                @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
+                {clk_stamp1, clk_stamp2} = esp_if.dma_write_chnl_data;
+                $display("Clock stamps: send %0d, process %0d clk cicles", clk_stamp1, clk_stamp2);
+            end
             i++;
         end
+
         esp_if.dma_write_chnl_ready = 0;
         @(posedge esp_if.clk);
 

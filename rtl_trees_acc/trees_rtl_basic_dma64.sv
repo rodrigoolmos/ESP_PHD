@@ -65,6 +65,10 @@ module trees_rtl_basic_dma64 #(
 
 	logic                           load_trees_s;
 
+	logic [31:0]                    clk_stamp1, clk_stamp2;
+
+
+
 	// TREES COMPUTE UNIT
 	trees_ping_pong #(
 		.N_TREES(N_TREES),
@@ -114,10 +118,14 @@ module trees_rtl_basic_dma64 #(
 			wr_ptr                  	<= 0;
 			start                   	<= 0;
 			load_features           	<= 0;
+			clk_stamp1			 		<= 0;
+			clk_stamp2			 		<= 0;
 		end else begin
 			case (state)
 				IDLE: begin
 					acc_done <= 0;
+					clk_stamp1 <= 0;
+					clk_stamp2 <= 0;
 					if (conf_done) begin
 						dma_read_ctrl_valid       <= 1;
 						dma_read_ctrl_data_index  <= 0;
@@ -136,6 +144,7 @@ module trees_rtl_basic_dma64 #(
 				// If conf_info_load_trees[0] is set, it reads trees; otherwise,
 				// it reads features.
 				DMA_READ: begin
+					clk_stamp1 <= clk_stamp1 + 1;
 					start <= 0;
 					if (dma_read_ctrl_valid && dma_read_ctrl_ready)
 						dma_read_ctrl_valid <= 0;
@@ -155,6 +164,7 @@ module trees_rtl_basic_dma64 #(
 				end
 				
 				COMPUTE: begin
+					clk_stamp2 <= clk_stamp2 + 1;
 					start <= 0;
 					if (conf_info_load_trees[0]) begin
 						dma_write_ctrl_valid       <= 1;
@@ -166,7 +176,7 @@ module trees_rtl_basic_dma64 #(
 					end else if (end_compute) begin
 						dma_write_ctrl_valid       <= 1;
 						dma_write_ctrl_data_index  <= 0;
-						dma_write_ctrl_data_length <= (conf_info_burst_len + 7) >> 3; //ceil(x / 8)
+						dma_write_ctrl_data_length <= ((conf_info_burst_len + 7) >> 3) + 1; //ceil(x) / 8) + performance CLK
 						dma_write_ctrl_data_size   <= 3'b011;
 						dma_write_ctrl_data_user   <= 0;
 						state                      <= DMA_WRITE;
@@ -177,6 +187,7 @@ module trees_rtl_basic_dma64 #(
 				end
 
 				DMA_WRITE: begin
+					clk_stamp1 <= clk_stamp1 + 1;
 					if (dma_write_ctrl_valid && dma_write_ctrl_ready)
 						dma_write_ctrl_valid <= 0;
 
@@ -209,9 +220,12 @@ module trees_rtl_basic_dma64 #(
 	always_comb begin
 		if (state == DMA_WRITE) begin
 			if (conf_info_load_trees[0])
-				dma_write_chnl_data = 64'h524F445249474F2E;		 // "RODRIGO."
+				dma_write_chnl_data = {clk_stamp1, clk_stamp2};
 			else
-				dma_write_chnl_data = prediction;
+				if (wr_ptr == dma_write_ctrl_data_length-1)
+					dma_write_chnl_data = {clk_stamp1, clk_stamp2};
+				else
+					dma_write_chnl_data = prediction;
 		end else begin
 			dma_write_chnl_data = 64'd0;
 		end
