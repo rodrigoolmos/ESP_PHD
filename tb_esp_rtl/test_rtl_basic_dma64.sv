@@ -14,6 +14,10 @@ module test_rtl_basic_dma64 (
     output logic [31:0] debug,                          // FSM state for debug
 
     // DMA read control
+    // If valid ready handshake is done you need to read dma_read_ctrl_data_length
+    // if not bus gets stuck for that you need dma_read_chnl_ready dma_read_chnl_valid
+    // handshake for dma_read_ctrl_data_length CLK clicles and dma_read_ctrl_data_length has to be
+    // greater than 0
     input  logic        dma_read_ctrl_ready,            // Ready for new read request
     output logic        dma_read_ctrl_valid,            // Start a read
     output logic [31:0] dma_read_ctrl_data_index,       // Read offset (beats)
@@ -27,6 +31,10 @@ module test_rtl_basic_dma64 (
     input  logic [63:0] dma_read_chnl_data,             // Incoming beat
 
     // DMA write control
+    // If valid ready handshake is done you need to read dma_write_ctrl_data_length
+    // if not bus gets stuck for that you need dma_write_chnl_ready dma_write_chnl_valid
+    // handshake for dma_write_ctrl_data_length CLK clicles and dma_write_ctrl_data_length has to be
+    // greater than 0
     input  logic        dma_write_ctrl_ready,           // Ready for new write request
     output logic        dma_write_ctrl_valid,           // Start a write
     output logic [31:0] dma_write_ctrl_data_index,      // Write offset (beats)
