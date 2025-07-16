@@ -35,6 +35,7 @@ int read_n_features(const char *csv_file, int n, struct feature *features,
     while (fgets(line, MAX_LINE_LENGTH, file) && read_samples < n) {
         block_i = read_samples/MAX_BURST;
         local_i = read_samples%MAX_BURST;
+        // Set the pointer to the new block of features
         ptr_32 = (float*)features_buff[block_i];
         float temp[N_FEATURE + 1];
         char *token = strtok(line, ",");
@@ -48,6 +49,7 @@ int read_n_features(const char *csv_file, int n, struct feature *features,
 
         for (i = 0; i < index - 1; i++) {
             features[read_samples].features[i] = temp[i];
+            // Store the features in the block
             ptr_32[local_i * N_FEATURE + i]  = temp[i];
         }
         features[read_samples].prediction = (uint8_t) temp[index - 1];
