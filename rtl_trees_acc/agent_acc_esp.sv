@@ -59,12 +59,15 @@ class agent_esp_acc;
 
     // Local storage for predictions
     bit [7:0] predictions_sw[N_SAMPLES-1:0];
-    bit [7:0] predictions_hw[N_SAMPLES-1:0];
+    bit [7:0] predictions_hw[2*N_SAMPLES-1:0];
     int predictions_count = 0;
     int mismatches_count = 0;
 
     // Simulated memory array accessed by the DMA
     bit [63:0] mem[*];
+
+
+    int unsigned burst_len_1;
 
     // Constructor: bind the interface and reset relevant signals
     function new(virtual esp_acc_if esp_if);
@@ -91,13 +94,13 @@ class agent_esp_acc;
         end
     endtask
 
-    local task read_predictions(int n_predictions);
+    local task read_predictions(int n_predictions, bit check_mismatches = 1);
         int i, j;
         for (i = 0; i < n_predictions/8; i++) begin
             for (j=0; j<8; ++j) begin
                 predictions_hw[predictions_count++] = mem[read_index + i][8*j+: 8];
                 $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
-                if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1]) begin
+                if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1] && check_mismatches) begin
                     mismatches_count++;
                     $display("Mismatch at prediction %0d: expected %0h, got %0h", 
                              predictions_count-1, predictions_sw[predictions_count-1], 
@@ -109,7 +112,7 @@ class agent_esp_acc;
         for (j=0; j<n_predictions%8; ++j) begin
             predictions_hw[predictions_count++] = mem[read_index + i][8*j+: 8];
             $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
-            if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1]) begin
+            if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1] && check_mismatches) begin
                 mismatches_count++;
                 $display("Mismatch at prediction %0d: expected %0h, got %0h", 
                          predictions_count-1, predictions_sw[predictions_count-1], 
@@ -117,6 +120,12 @@ class agent_esp_acc;
                 $stop;
             end
         end
+    endtask
+
+    // Reset agent
+    task reset();
+        predictions_count = 0;
+        mismatches_count = 0;
     endtask
 
     // Extract a block of data from simulated memory
@@ -149,6 +158,9 @@ class agent_esp_acc;
 
         bit [31:0] clk_stamp1, clk_stamp2; 
 
+        if (burst_len)
+            burst_len_1 = burst_len;
+
         // CONFIG PHASE: apply registers
         esp_if.conf_info_load_trees = load_trees;
         esp_if.conf_info_burst_len = burst_len;
@@ -157,23 +169,26 @@ class agent_esp_acc;
         @(posedge esp_if.clk);
         esp_if.conf_done      = 0;
 
-        // READ CONTROL: handshake
-        esp_if.dma_read_ctrl_ready = 1;
-        wait (esp_if.dma_read_ctrl_valid && esp_if.dma_read_ctrl_ready);
-        @(posedge esp_if.clk);
-        read_index  = esp_if.dma_read_ctrl_data_index;
-        read_length = esp_if.dma_read_ctrl_data_length;
-        esp_if.dma_read_ctrl_ready = 0;
-
-        // READ CHANNEL: supply data beats
-        esp_if.dma_read_chnl_valid = 1;
-        for (int i = 0; i < read_length; ) begin
-            esp_if.dma_read_chnl_data = mem[read_index + i];
-            i++;
-            @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
+        // Load trees into memory if requested
+        if (burst_len || load_trees) begin
+            // READ CONTROL: handshake
+            esp_if.dma_read_ctrl_ready = 1;
+            wait (esp_if.dma_read_ctrl_valid && esp_if.dma_read_ctrl_ready);
+            @(posedge esp_if.clk);
+            read_index  = esp_if.dma_read_ctrl_data_index;
+            read_length = esp_if.dma_read_ctrl_data_length;
+            esp_if.dma_read_ctrl_ready = 0;
+    
+            // READ CHANNEL: supply data beats
+            esp_if.dma_read_chnl_valid = 1;
+            for (int i = 0; i < read_length; ) begin
+                esp_if.dma_read_chnl_data = mem[read_index + i];
+                i++;
+                @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
+            end
+            esp_if.dma_read_chnl_valid = 0;
+            @(posedge esp_if.clk);
         end
-        esp_if.dma_read_chnl_valid = 0;
-        @(posedge esp_if.clk);
 
         // WRITE CONTROL: handshake
         esp_if.dma_write_ctrl_ready = 1;
@@ -206,8 +221,10 @@ class agent_esp_acc;
         @(posedge esp_if.clk);
 
         // Read predictions from memory
-        read_predictions(burst_len);
-    endtask
+        if (!load_trees)
+            read_predictions(burst_len_1, (burst_len) ? 1 : 0);
+
+endtask
 
     // Generate a gold standard for the expected output
     task automatic gold_gen(input bit[63:0] trees [N_NODES*N_TREES-1:0], 

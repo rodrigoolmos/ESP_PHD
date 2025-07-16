@@ -183,6 +183,36 @@ module tb_esp_trees;
             offset_processed += load_length;
         end
 
+        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
+        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
+        agent_esp_acc_inst.print_metrics(labels_mem);
+        agent_esp_acc_inst.reset(); // Reset the agent for next processing
+
+        ///////////////////////////////////////////////////////////////////////
+
+        #(t_clk*20000) @(posedge esp_acc_if_inst.clk);
+
+        data_processed = 0;
+        offset_processed = 0;
+        while (data_processed < N_SAMPLES) begin
+            samples_2_process = $urandom_range(1, MAX_BURST);
+            if ((data_processed + samples_2_process) >= N_SAMPLES) begin
+                samples_2_process = N_SAMPLES - data_processed;
+            end
+            $display("Data processed: %0d, Samples to process: %0d", data_processed, samples_2_process);
+            // Load the features into the RTL module
+            load_length = samples_2_process * (COLUMNAS-1)/2; // 2 features per beat
+            agent_esp_acc_inst.load_memory(0, load_length, offset_processed, features_mem_64);
+            // Run the RTL module with the features
+            agent_esp_acc_inst.run(0, samples_2_process);
+            data_processed += samples_2_process;
+            offset_processed += load_length;
+        end
+
+        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
+        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
+
+
         agent_esp_acc_inst.print_metrics(labels_mem);
 
         $stop;

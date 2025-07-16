@@ -66,6 +66,8 @@ module trees_rtl_basic_dma64 #(
 	logic                           load_trees_s;
 
 	logic [31:0]                    clk_stamp1, clk_stamp2;
+	logic [31:0] 					conf_info_burst_len_ff;
+
 
 
 
@@ -88,7 +90,7 @@ module trees_rtl_basic_dma64 #(
 
 		.load_features(load_features),
 		.feature_addr(rd_ptr),
-		.burst_len(conf_info_burst_len),
+		.burst_len(conf_info_burst_len_ff),
 		.features2(dma_read_chnl_data),
 
 		.prediction(prediction),
@@ -120,24 +122,40 @@ module trees_rtl_basic_dma64 #(
 			load_features           	<= 0;
 			clk_stamp1			 		<= 0;
 			clk_stamp2			 		<= 0;
+
 		end else begin
 			case (state)
 				IDLE: begin
 					acc_done <= 0;
 					clk_stamp1 <= 0;
 					clk_stamp2 <= 0;
+					load_features <= 0;
 					if (conf_done) begin
-						dma_read_ctrl_valid       <= 1;
-						dma_read_ctrl_data_index  <= 0;
-						if (conf_info_load_trees[0])
+						if (conf_info_load_trees[0]) begin
+							// If conf_info_load_trees[0] is set, we load trees
+							dma_read_ctrl_valid       <= 1;
 							dma_read_ctrl_data_length <= N_TREES * N_NODE_AND_LEAFS;
-						else begin
-							dma_read_ctrl_data_length <= (conf_info_burst_len * N_FEATURE + 1) >> 1; // FEATURES COME IN PAIRS
+							state 				      <= DMA_READ;
+							dma_read_ctrl_data_size   <= 3'b011;
+							dma_read_ctrl_data_user   <= 0;
+							dma_read_chnl_ready       <= 1;	
+						end else begin
+							if (conf_info_burst_len != 0) begin
+								// If conf_info_load_trees[0] is not set, we load features
+								dma_read_ctrl_valid       <= 1;
+								dma_read_ctrl_data_length <= (conf_info_burst_len * N_FEATURE + 1) >> 1; // FEATURES COME IN PAIRS
+								state <= DMA_READ;
+								dma_read_ctrl_data_size   <= 3'b011;
+								dma_read_ctrl_data_user   <= 0;
+								dma_read_chnl_ready       <= 1;						
+								conf_info_burst_len_ff <= conf_info_burst_len;
+							end else begin
+								// if burst_len is 0, we reprocess the features
+								state <= COMPUTE;
+								start <= !conf_info_load_trees[0];
+							end
 						end
-						dma_read_ctrl_data_size   <= 3'b011;
-						dma_read_ctrl_data_user   <= 0;
-						dma_read_chnl_ready       <= 1;
-						state                     <= DMA_READ;
+
 					end
 				end
 				// DMA_READ state handles reading features or trees
@@ -158,7 +176,7 @@ module trees_rtl_basic_dma64 #(
 							dma_read_chnl_ready <= 0;
 							rd_ptr <= 0;
 							state  <= COMPUTE;
-							load_features		   	  <= 0;
+							load_features <= 0;
 						end
 					end
 				end
@@ -168,15 +186,15 @@ module trees_rtl_basic_dma64 #(
 					start <= 0;
 					if (conf_info_load_trees[0]) begin
 						dma_write_ctrl_valid       <= 1;
-						dma_write_ctrl_data_index  <= 0;
-						dma_write_ctrl_data_length <= 1;
+						dma_write_ctrl_data_length <= 1;	// performance CLK
 						dma_write_ctrl_data_size   <= 3'b011;
 						dma_write_ctrl_data_user   <= 0;
 						state                      <= DMA_WRITE;
 					end else if (end_compute) begin
 						dma_write_ctrl_valid       <= 1;
-						dma_write_ctrl_data_index  <= 0;
-						dma_write_ctrl_data_length <= ((conf_info_burst_len + 7) >> 3) + 1; //ceil(x) / 8) + performance CLK
+						//ceil(x) / 8) + performance CLK
+						dma_write_ctrl_data_length <= ((conf_info_burst_len_ff + 7) >> 3) + 1;
+						
 						dma_write_ctrl_data_size   <= 3'b011;
 						dma_write_ctrl_data_user   <= 0;
 						state                      <= DMA_WRITE;
