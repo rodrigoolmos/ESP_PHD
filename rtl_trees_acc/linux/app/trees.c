@@ -18,19 +18,24 @@ union stamps{
     uint64_t data;
 };
 
-
-int read_n_features(const char *csv_file, int n, struct feature *features) {
+int read_n_features(const char *csv_file, int n, struct feature *features, 
+                    token_t *features_buff[MAX_BURST*N_FEATURE]) {
     FILE *file = fopen(csv_file, "r");
     char line[MAX_LINE_LENGTH];
-    int features_read = 0;
-    int i;
+    int read_samples = 0;
+    int i, block_i, local_i;
+    float* ptr_32;
 
     if (!file) {
         printf("Failed to open the features file %s\n", csv_file);
         return -1;
     }
 
-    while (fgets(line, MAX_LINE_LENGTH, file) && features_read < n) {
+    
+    while (fgets(line, MAX_LINE_LENGTH, file) && read_samples < n) {
+        block_i = read_samples/MAX_BURST;
+        local_i = read_samples%MAX_BURST;
+        ptr_32 = (float*)features_buff[block_i];
         float temp[N_FEATURE + 1];
         char *token = strtok(line, ",");
         int index = 0;
@@ -42,19 +47,20 @@ int read_n_features(const char *csv_file, int n, struct feature *features) {
         }
 
         for (i = 0; i < index - 1; i++) {
-            features[features_read].features[i] = temp[i];
+            features[read_samples].features[i] = temp[i];
+            ptr_32[local_i * N_FEATURE + i]  = temp[i];
         }
-        features[features_read].prediction = (uint8_t) temp[index - 1];
+        features[read_samples].prediction = (uint8_t) temp[index - 1];
 
-        features_read++;
+        read_samples++;
     }
 
     fclose(file);
-    printf("Read %d features from %s\n", features_read, csv_file);
-    return features_read;
+    printf("Read %d features from %s\n", read_samples, csv_file);
+    return read_samples;
 }
 
-void load_model(tree_data tree_data[N_TREES][N_NODE_AND_LEAFS], const char *filename)
+void load_model(token_t *tree_buf, const char *filename)
 {
     char magic_number[5] = {0};
     FILE *file = fopen(filename, "rb");
@@ -68,7 +74,10 @@ void load_model(tree_data tree_data[N_TREES][N_NODE_AND_LEAFS], const char *file
     if (!memcmp(magic_number, "model", 5)) {
         for (int t = 0; t < N_TREES; t++) {
             for (int n = 0; n < N_NODE_AND_LEAFS; n++) {
-                fread(&tree_data[t][n], sizeof(uint64_t), 1, file);
+                fread(&tree_buf[t * N_NODE_AND_LEAFS + n], sizeof(uint64_t), 1, file);
+                if (t == 0 && n == 0){
+                    printf("Dato en sdad hexadecimal: 0x%" PRIx64 "\n", tree_buf[0]);
+                }
             }
         }
     }
@@ -95,25 +104,6 @@ static void init_parameters()
     size       = (out_offset * sizeof(token_t)) + out_size;
 }
 
-void coppy_trees(tree_data tree[N_TREES][N_NODE_AND_LEAFS], token_t *buf)
-{
-    for (int t = 0; t < N_TREES; t++) {
-        for (int n = 0; n < N_NODE_AND_LEAFS; n++) {
-            buf[t * N_NODE_AND_LEAFS + n] = tree[t][n].compact_data;
-        }
-    }
-}
-
-void copy_features_bytes(token_t *mem, const struct feature *features, int n_features)
-{
-    uint8_t *dst_bytes = (uint8_t *)mem;
-
-    for (int i = 0; i < n_features; i++) {
-        size_t offset = i * sizeof(float)*N_FEATURE;
-        memcpy(dst_bytes + offset, features[i].features, sizeof(float)*N_FEATURE);
-    }
-}
-
 void send_trees(token_t *buf)
 {
     
@@ -129,8 +119,7 @@ void send_trees(token_t *buf)
 
 }
 
-void perform_inferences_hw(token_t *buf, struct feature *features,
-                            int read_samples, uint8_t *predictions, 
+void perform_inferences_hw(token_t *buf, int read_samples, uint8_t *predictions, 
                             float *exe_time_ms)
 {
 
@@ -149,12 +138,11 @@ void perform_inferences_hw(token_t *buf, struct feature *features,
     union stamps u_stamps;
 
     printf("Performing inferences...\n");
-    trees_cfg_000[0].burst_len = read_samples;
-    trees_cfg_000[0].load_trees = 0;
-    copy_features_bytes(buf, features, read_samples);
-    cfg_000[0].hw_buf = buf;
     esp_monitor(mon_args, &vals_start);
     gettime(&startn);
+    trees_cfg_000[0].burst_len = read_samples;
+    trees_cfg_000[0].load_trees = 0;
+    cfg_000[0].hw_buf = buf;
     esp_run(cfg_000, NACC);
     gettime(&endn);
     esp_monitor(mon_args, &vals_end);
@@ -204,33 +192,32 @@ void print_accuracy(struct feature *features, uint8_t *predictions,
            evaluated_total, read_samples);
 }
 
-void evaluate_model(token_t *buf, struct feature *features, int read_samples, int n_classes,
+void evaluate_model(token_t *trees_buf, token_t *features_buf[MAX_BURST],  struct feature *features, int read_samples, int n_classes,
                     uint8_t *predictions, uint32_t max_burst, float *exe_time_ms)
 {
     uint32_t processed = 0;
-    uint32_t burst;
+    uint32_t burst, burst_i=0;
     float exe_t;
     *exe_time_ms = 0;
 
-    send_trees(buf);
+    send_trees(trees_buf);
 
     while (processed < read_samples) {
         burst =
             (read_samples - processed) > max_burst ? max_burst : (read_samples - processed);
         printf("Processing batch %i, processed %i of %i\n", burst, processed, read_samples);
-        perform_inferences_hw(buf, &features[processed], 
+        perform_inferences_hw(features_buf[burst_i],
                                 burst, &predictions[processed], &exe_t);
         *exe_time_ms += exe_t;
         processed += burst;
+        burst_i++;
     }
 
     print_accuracy(features, predictions, read_samples, n_classes);
 }
 
-void make_prediction(uint64_t tree[N_TREES][N_NODE_AND_LEAFS], float features[N_FEATURE],
-                     int32_t *prediction)
+void make_prediction(token_t *tree, float features[N_FEATURE], int32_t *prediction)
 {
-    int32_t sum = 0;
     int32_t leaf_value;
     int32_t counts[N_CLASSES] = {0};
 
@@ -243,7 +230,7 @@ void make_prediction(uint64_t tree[N_TREES][N_NODE_AND_LEAFS], float features[N_
         tree_data tree_data;
 
         while (1) {
-            tree_data.compact_data = tree[t][node_index];
+            tree_data.compact_data = tree[t * N_NODE_AND_LEAFS + node_index];
             feature_index          = tree_data.tree_camps.feature_index;
             threshold              = tree_data.tree_camps.float_int_union.f;
             node_left              = node_index + 1;
@@ -262,7 +249,7 @@ void make_prediction(uint64_t tree[N_TREES][N_NODE_AND_LEAFS], float features[N_
     // Busca la clase ganadora
     int32_t best       = 0;
     int32_t best_count = counts[0];
-find_best:
+
     for (int c = 1; c < N_CLASSES; c++) {
         if (counts[c] > best_count) {
             best_count = counts[c];
@@ -274,9 +261,8 @@ find_best:
 }
 
 void software_prediction(struct feature *features, int read_samples,
-                         uint64_t tree[N_TREES][N_NODE_AND_LEAFS], 
-                         int n_classes, uint8_t *predictions_hw, 
-                         float *exe_time_ms)
+                            token_t* tree, int n_classes, uint8_t *predictions_sw, 
+                            float *exe_time_ms)
 {
     int32_t prediction;
     int accuracy[256]   = {0};
@@ -293,9 +279,7 @@ void software_prediction(struct feature *features, int read_samples,
             accuracy[features[i].prediction]++;
             accuracy_total++;
         }
-        if (predictions_hw[i] != prediction){
-            printf("Error diferent prediction %i hw, %"PRIu8 " != sw, %i\n", i, predictions_hw[i], (prediction & 0xff));
-        }
+        predictions_sw[i] = prediction;
         
 
         evaluated[features[i].prediction]++;
@@ -325,28 +309,49 @@ void find_n_classes(struct feature features[MAX_TEST_SAMPLES], int *n_classes, i
     }
 }
 
+void get_mismatchs(uint8_t *predictions_hw, uint8_t *predictions_sw, int read_samples)
+{
+
+    int mismatchs = 0;
+
+    for (int i = 0; i < read_samples; i++){
+        if (predictions_hw[i] != predictions_sw[i]){
+            mismatchs++;
+            printf("Error %i predictions_hw,%i != predictions_sw,%i\n", i, predictions_hw[i], predictions_sw[i]);
+        }
+    }
+
+    printf("Num mismatch %i\n", mismatchs);
+}
+
 int main(int argc, char **argv)
 {
-    token_t *buf;
+    token_t *features_buf[MAX_TEST_SAMPLES/MAX_BURST];
+    token_t *tree_buf;
     struct feature features_read[MAX_TEST_SAMPLES];
-    uint8_t predictions[MAX_TEST_SAMPLES];
+    uint8_t predictions_sw[MAX_TEST_SAMPLES];
+    uint8_t predictions_hw[MAX_TEST_SAMPLES];
     int n_classes;
     int read_samples;
-    tree_data tree_data[N_TREES][N_NODE_AND_LEAFS];
     float exe_time_ms_hw;
     float exe_time_ms_sw;
 
+    init_parameters();
+    for (int i = 0; i < MAX_TEST_SAMPLES/MAX_BURST; i++)
+        features_buf[i] = (token_t *)esp_alloc(MAX_BURST*N_FEATURE*(sizeof(float)));
+    tree_buf = (token_t *)esp_alloc(size);
+
     // Validación de los argumentos: se esperan dos argumentos (dataset y modelo)
     if (argc < 3) {
-        printf("Uso: %s <dataset.csv> <modelo.model>\n", argv[0]);
+        printf("Use: %s <dataset.csv> <modelo.model>\n", argv[0]);
         return 1;
     }
 
-    printf("\n====== %s ======\n\n", cfg_000[0].devname);
+    printf("\nExecute ====== %s 2.0 ======\n\n", cfg_000[0].devname);
 
     // Cargar dataset desde el archivo recibido por línea de comandos
     printf("Cargando features desde %s...\n", argv[1]);
-    read_samples = read_n_features(argv[1], MAX_TEST_SAMPLES, features_read);
+    read_samples = read_n_features(argv[1], MAX_TEST_SAMPLES, features_read, features_buf);
     if (read_samples < 0) {
         return 1;
     }
@@ -357,24 +362,23 @@ int main(int argc, char **argv)
 
     // Cargar modelo desde el archivo recibido por línea de comandos
     printf("Cargando modelo desde %s...\n", argv[2]);
-    load_model(tree_data, argv[2]);
-
-    init_parameters();
-
-    buf = (token_t *)esp_alloc(size);
-
-    printf("Allocating trees in the buffer\n");
-    coppy_trees(tree_data, buf);
+    load_model(tree_buf, argv[2]);
+    
+    printf("evaluate_model software\n");
+    software_prediction(features_read, read_samples, tree_buf, n_classes, predictions_sw, &exe_time_ms_sw);
 
     printf("evaluate_model hardware\n");
-    evaluate_model(buf, features_read, read_samples, n_classes, predictions, MAX_BURST, &exe_time_ms_hw);
-
-    printf("evaluate_model software\n");
-    software_prediction(features_read, read_samples, tree_data, n_classes, predictions, &exe_time_ms_sw);
+    evaluate_model(tree_buf, features_buf, features_read, read_samples,
+                    n_classes, predictions_hw, MAX_BURST, &exe_time_ms_hw);
 
     printf("Speed up hardware vs software %f\n", exe_time_ms_sw/exe_time_ms_hw);
 
-    esp_free(buf);
+    get_mismatchs(predictions_hw, predictions_sw, read_samples);
+
+    for (int i = 0; i < MAX_TEST_SAMPLES/MAX_BURST; i++)
+        esp_free(features_buf[i]);
+
+    esp_free(tree_buf);
 
     return 0;
 }
