@@ -58,6 +58,7 @@ module trees_ping_pong #(
 
 	logic 								start_set;
 	logic 								done_set;
+	logic 								store_predictions;
 
 	logic								load_predictions;
 
@@ -82,6 +83,7 @@ module trees_ping_pong #(
 
         .prediction(prediction_set),
         .done(done_set),
+		.store_predictions(store_predictions),
 		.idle_sys(idle_sys)
     );
 
@@ -179,26 +181,20 @@ module trees_ping_pong #(
 			c_ping_ready <= 1;
 			c_pong_ready <= 1;
 			p_ping_pong <= 1;
-			prediction_packed <= 0;
 			start_set <= 0;
-			load_predictions <= 0;
-			prediction_index <= 0;
 		end else begin
 			case (proc_st)
 				P_IDLE: begin
 					start_set <= 0;
 					done <= 0;
-					prediction_packed <= 0;
 					if (start) begin
 						proc_st <= P_WAIT;
 						c_ping_ready <= 1;
 						c_pong_ready <= 1;
 						p_ping_pong <= 1;
-						prediction_index <= 0;
 					end
 				end
 				P_WAIT: begin
-					load_predictions <= 0;
 					c_ping_ready <= idle_sys;
 					if (p_ping_ready && p_ping_pong && idle_sys) begin
 						proc_st <= P_PING;
@@ -229,9 +225,6 @@ module trees_ping_pong #(
 				P_PING: begin
 					start_set <= 0;
 					if (done_set) begin
-						load_predictions <= 1;
-						prediction_packed[prediction_index[2:0]] <= prediction_set[7:0];
-						prediction_index <= prediction_index + 1;
 						proc_st <= P_WAIT;
 						c_ping_ready <= 1;
 						p_ping_pong <= 0;
@@ -240,15 +233,34 @@ module trees_ping_pong #(
 				P_PONG: begin
 					start_set <= 0;
 					if (done_set) begin
-						load_predictions <= 1;
-						prediction_packed[prediction_index[2:0]] <= prediction_set[7:0];
-						prediction_index <= prediction_index + 1;
 						proc_st <= P_WAIT;
 						c_pong_ready <= 1;
 						p_ping_pong <= 1;
 					end
 				end
 			endcase
+		end
+	end
+
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) begin
+			prediction_packed <= 0;
+			load_predictions <= 0;
+			prediction_index <= 0;
+		end else begin
+			if (proc_st == P_IDLE) begin
+				prediction_packed <= 0;
+				load_predictions  <= 0;
+				prediction_index  <= 0;
+			end
+
+			if (store_predictions) begin
+				load_predictions <= 1;
+				prediction_packed[prediction_index[2:0]] <= prediction_set[7:0];
+				prediction_index <= prediction_index + 1;
+			end else begin
+				load_predictions <= 0;
+			end
 		end
 	end
 

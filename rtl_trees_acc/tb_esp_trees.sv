@@ -8,7 +8,7 @@ module tb_esp_trees;
     parameter N_TREES          					= 128;
     parameter N_NODES         					= 256;
     parameter N_FEATURE        					= 32;
-    parameter N_CLASES        					= 5;
+    parameter N_CLASES        					= 32;
     parameter MAX_BURST        					= 5000;
 
     parameter N_SAMPLES = 10000;    // Number of samples

@@ -3,7 +3,8 @@ module trees #(
 	parameter int N_NODE_AND_LEAFS = 256,
 	parameter int N_FEATURE        = 32,
 	parameter int N_CLASES         = 32,
-	parameter int UNROLL	       = 8
+	parameter int UNROLL_C	       = 8,
+	parameter int UNROLL_V	       = 2
 )(
 	input  logic                          		clk,
 	input  logic                          		rst_n,
@@ -21,6 +22,7 @@ module trees #(
 	// Salida final
 	output logic [7:0]                    		prediction,
 	output logic                          		done,
+	output logic                          		store_predictions,
 	output logic                          		idle_sys
 );
 
@@ -35,25 +37,37 @@ module trees #(
 	// ----------------------------------------------------------------
 	//  Señales para el ensamble de árboles
 	// ----------------------------------------------------------------
-	logic [31:0]               leaf_vals   [0:N_TREES-1];
+	logic [31:0]               leaf_vals    [0:N_TREES-1];
+	logic [31:0]               leaf_vals_ff [0:N_TREES-1];
 	logic [N_TREES-1:0]        tree_done;
-	logic [FEAT_IDX_W-1:0]     feature_idx [0:N_TREES-1];
-	logic [N_NODE_W-1:0]       node_idx    [0:N_TREES-1];
+	logic [FEAT_IDX_W-1:0]     feature_idx  [0:N_TREES-1];
+	logic [N_NODE_W-1:0]       node_idx     [0:N_TREES-1];
 
 	// ----------------------------------------------------------------
 	//  Contadores para votación
 	// ----------------------------------------------------------------
-	logic [CNT_W-1:0]          voted_trees  	[UNROLL-1:0][0:N_CLASES-1];
-	logic [CNT_W-1:0]          voted_trees_f  	[0:N_CLASES-1];
-	logic [CNT_W-1:0]          tmp_voted;
-	logic [7:0]                value_pred;
-	logic [CNT_W-1:0]          cnt_trees;
-	logic [N_CLASES_W-1:0]     cnt_vote;
+	logic [CNT_W-1:0]          			voted_trees  	[UNROLL_C-1:0][0:N_CLASES-1];
+	logic [CNT_W-1:0]          			voted_trees_s  	[0:N_CLASES-1];
+	logic [CNT_W-1:0]          			voted_trees_s_f	[0:N_CLASES-1];
+	logic [CNT_W-1:0]          			cnt_trees;
+	logic [N_CLASES + UNROLL_C:0]       cnt_vote;
+	logic [N_CLASES_W-1:0]     			max_vote;
+	logic [N_CLASES_W-1:0]     			max_vote_ff;
+	logic [7:0]     					prediction_ff;
+	logic [7:0]     					prediction_next;
 
+	// FSM de control de trees
+	typedef enum logic { T_IDLE, T_WORK } tree_st_t;
+	tree_st_t tree_st;
+	logic t_done;
+	// FSM de control de count
+	typedef enum logic { C_IDLE, C_WORK } count_st_t;
+	count_st_t count_st;
+	logic c_done;
 	// FSM de control de votación
-	typedef enum logic [1:0] { VS_IDLE, VS_COUNT, VS_VOTE, VS_SELECT } vote_st_t;
+	typedef enum logic { V_IDLE, V_WORK} vote_st_t;
 	vote_st_t vote_st;
-	logic     start_ff;
+	logic v_done;
 
 	// ----------------------------------------------------------------
 	//  Instanciación de N_TREES BRAMs y motores tree
@@ -96,82 +110,152 @@ module trees #(
 		end
 	endgenerate
 
-	always_comb begin
-		for (int i = 0; i < N_CLASES; i++) begin
-			voted_trees_f[i] = 0;
-			for (int j = 0; j < UNROLL; j++)
-				voted_trees_f[i] += voted_trees[j][i];
-		end
-	end
-
 	// ----------------------------------------------------------------
-	//  FSM de salida: combinar done y generar prediction
+	//  FSM de: TREES
 	// ----------------------------------------------------------------
 	always_ff @(posedge clk or negedge rst_n) begin
 		if (!rst_n) begin
-			for (int j=0; j<UNROLL; ++j)
-				for (int i = 0; i < N_CLASES; i++)
-					voted_trees[j][i] <= 0;
-			value_pred   <= 0;      
-			tmp_voted    <= 0;
-			cnt_trees    <= 0;
-			cnt_vote     <= 0;
-			start_ff     <= 0;
-			vote_st      <= VS_IDLE;
-			done         <= 0;
-			idle_sys	 <= 1;
+			tree_st <= T_IDLE;
+			t_done <= 0;
+			for (int i = 0; i < N_TREES; i++)
+				leaf_vals_ff[i] <= 0;
 		end else begin
-			case (vote_st)
-			VS_IDLE: begin
-				done         <= 0;
-				cnt_trees    <= 0;
-				idle_sys	 <= 1;
-				for (int j=0; j<UNROLL; ++j)
-					for (int i = 0; i < N_CLASES; i++)
-						voted_trees[j][i] <= 0;
-				if (start)
-					start_ff   <= 1;
-				if (start_ff && &tree_done) begin
-					idle_sys	 <= 0;
-					vote_st    <= VS_COUNT;
-				end
-			end
 
-			VS_COUNT: begin
-				for (int j = 0; j < UNROLL; j++) begin
-					if (cnt_trees + j * (N_TREES / UNROLL) < N_TREES) begin
-						voted_trees[j][leaf_vals[cnt_trees + j * (N_TREES / UNROLL)]] <= 
-							voted_trees[j][leaf_vals[cnt_trees + j * (N_TREES / UNROLL)]] + 1;
-					end
-				end
-				cnt_trees <= cnt_trees + 1;
-				if (cnt_trees == (N_TREES / UNROLL) - 1) begin
-					cnt_vote   <= 0;
-					tmp_voted  <= 0;
-					value_pred <= 0;
-					vote_st    <= VS_VOTE;
+			case (tree_st)
+			T_IDLE: begin
+				t_done <= 0;
+				if (start) begin
+					tree_st <= T_WORK;
 				end
 			end
-
-			VS_VOTE: begin
-				cnt_vote <= cnt_vote + 1;
-				if (voted_trees_f[cnt_vote] > tmp_voted) begin
-					tmp_voted   <= voted_trees_f[cnt_vote];
-					value_pred  <= cnt_vote;
-				end
-				if (cnt_vote == N_CLASES-1) begin
-					vote_st    <= VS_SELECT;
+			T_WORK: begin
+				if (&tree_done && count_st == C_IDLE) begin
+					tree_st <= T_IDLE;
+					t_done <= 1;
+					// Copiar valores de hojas a registros
+					for (int i = 0; i < N_TREES; i++)
+						leaf_vals_ff[i] <= leaf_vals[i];
 				end
 			end
-
-			VS_SELECT: begin
-				start_ff     <= 0;
-				prediction   <= value_pred;
-				done         <= 1;
-				vote_st      <= VS_IDLE;
-			end
+			default: tree_st <= T_IDLE;
 			endcase
 		end
 	end
+
+	always_comb begin
+		done = t_done;
+		idle_sys = (tree_st == T_IDLE);
+	end 
+
+	// ----------------------------------------------------------------
+	//  FSM de: COUNT
+	// ----------------------------------------------------------------
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) begin
+			count_st 	<= C_IDLE;
+			c_done   	<= 0;
+			cnt_trees   <= 0;
+			for (int i = 0; i < N_CLASES; i++)
+				voted_trees_s_f[i] <= 0;
+			for (int j=0; j<UNROLL_C; ++j)
+				for (int i = 0; i < N_CLASES; i++)
+					voted_trees[j][i] <= 0;
+		end else begin
+			case (count_st)
+			C_IDLE: begin
+				cnt_trees   <= 0;
+				c_done <= 0;
+				for (int j=0; j<UNROLL_C; ++j)
+					for (int i = 0; i < N_CLASES; i++)
+						voted_trees[j][i] <= 0;
+				if (t_done) begin
+					count_st <= C_WORK;
+				end
+			end
+			C_WORK: begin
+				if (cnt_trees < (N_TREES / UNROLL_C)) begin
+					for (int j = 0; j < UNROLL_C; j++) begin
+						if (cnt_trees + j * (N_TREES / UNROLL_C) < N_TREES) begin
+							voted_trees[j][leaf_vals_ff[cnt_trees + j * (N_TREES / UNROLL_C)]] <= 
+								voted_trees[j][leaf_vals_ff[cnt_trees + j * (N_TREES / UNROLL_C)]] + 1;
+						end
+					end
+					cnt_trees <= cnt_trees + 1;
+				end else if (vote_st == V_IDLE) begin
+					c_done    <= 1;
+					count_st  <= C_IDLE;
+					for (int i = 0; i < N_CLASES; i++)
+						voted_trees_s_f[i] <= voted_trees_s[i];
+				end
+			end
+			default: count_st <= C_IDLE;
+			endcase
+		end
+	end
+
+	always_comb begin
+		for (int i = 0; i < N_CLASES; i++) begin
+			voted_trees_s[i] = 0;
+			for (int j = 0; j < UNROLL_C; j++)
+				voted_trees_s[i] += voted_trees[j][i];
+		end
+	end
+
+	// ----------------------------------------------------------------
+	//  FSM de: VOTE
+	// ----------------------------------------------------------------
+	always_ff @(posedge clk or negedge rst_n) begin
+		if (!rst_n) begin
+			vote_st   <= V_IDLE;
+			v_done    <= 0;
+			cnt_vote  <= 0;
+			prediction <= 0;
+			max_vote_ff <= 0;
+			prediction_ff <= 0;
+		end else begin
+			case (vote_st)
+			V_IDLE: begin
+				prediction <= 0;
+				max_vote_ff <= 0;
+				v_done <= 0;
+				cnt_vote <= 0;
+				if (c_done) begin
+					vote_st <= V_WORK;
+				end
+			end
+			V_WORK: begin
+				if (cnt_vote < N_CLASES) begin
+					cnt_vote <= cnt_vote + UNROLL_V;
+				end else begin
+					v_done <= 1;
+					prediction <= prediction_ff;
+					vote_st <= V_IDLE;
+				end
+				prediction_ff <= prediction_next;
+				max_vote_ff <= max_vote;
+			end
+			default: vote_st <= V_IDLE;
+			endcase
+		end
+	end
+
+	always_comb	store_predictions = v_done;
+
+	always_comb begin
+		max_vote = 0;
+		prediction_next = prediction_ff;
+
+		for (int j = 0; j < UNROLL_V; j++) begin
+			if (max_vote < voted_trees_s_f[j+cnt_vote] && j < N_CLASES) begin
+				max_vote = voted_trees_s_f[j+cnt_vote];
+				if (max_vote > max_vote_ff)
+					prediction_next = j + cnt_vote;
+			end
+		end
+
+		if (max_vote < max_vote_ff)
+			max_vote = max_vote_ff;
+	end
+
 
 endmodule
