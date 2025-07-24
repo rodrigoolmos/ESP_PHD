@@ -66,7 +66,6 @@ class agent_esp_acc;
     // Simulated memory array accessed by the DMA
     bit [63:0] mem[*];
 
-
     int unsigned burst_len_1;
 
     // Constructor: bind the interface and reset relevant signals
@@ -122,6 +121,75 @@ class agent_esp_acc;
         end
     endtask
 
+    local task wait_acc_done ();
+        // WAIT for accelerator to assert acc_done
+        wait (esp_if.acc_done == 1);
+        @(posedge esp_if.clk);
+    endtask
+
+    local task dma_read();
+            // READ CONTROL: handshake
+            esp_if.dma_read_ctrl_ready = 1;
+            wait (esp_if.dma_read_ctrl_valid && esp_if.dma_read_ctrl_ready);
+            @(posedge esp_if.clk);
+            read_index  = esp_if.dma_read_ctrl_data_index;
+            read_length = esp_if.dma_read_ctrl_data_length;
+            esp_if.dma_read_ctrl_ready = 0;
+    
+            // READ CHANNEL: supply data beats
+            esp_if.dma_read_chnl_valid = 1;
+            for (int i = 0; i < read_length; ) begin
+                esp_if.dma_read_chnl_data = mem[read_index + i];
+                i++;
+                @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
+            end
+            esp_if.dma_read_chnl_valid = 0;
+            @(posedge esp_if.clk);
+    endtask
+
+    local task dma_write();
+
+        bit [31:0] clk_stamp1, clk_stamp2; 
+
+        // WRITE CONTROL: handshake
+        esp_if.dma_write_ctrl_ready = 1;
+        wait (esp_if.dma_write_ctrl_valid && esp_if.dma_write_ctrl_ready);
+        @(posedge esp_if.clk);
+        write_index  = esp_if.dma_write_ctrl_data_index;
+        write_length = esp_if.dma_write_ctrl_data_length;
+        esp_if.dma_write_ctrl_ready = 0;
+
+        // WRITE CHANNEL: capture returned data
+        esp_if.dma_write_chnl_ready = 1;
+        for (int i = 0; i < write_length; ) begin
+            if (i<write_length-1) begin
+                @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
+                mem[write_index + i] = esp_if.dma_write_chnl_data;
+            end else begin
+                // Last beat contains clock stamps
+                @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
+                {clk_stamp1, clk_stamp2} = esp_if.dma_write_chnl_data;
+                $display("Clock stamps: send %0d, process %0d clk cicles", clk_stamp1, clk_stamp2);
+            end
+            i++;
+        end
+
+        esp_if.dma_write_chnl_ready = 0;
+        @(posedge esp_if.clk);
+    endtask
+
+    local task config_acc(input int unsigned load_trees,
+                            input int unsigned burst_len);
+
+        // CONFIG PHASE: apply registers
+        esp_if.conf_info_load_trees = load_trees;
+        esp_if.conf_info_burst_len = burst_len;
+        @(posedge esp_if.clk);
+        esp_if.conf_done      = 1;
+        @(posedge esp_if.clk);
+        esp_if.conf_done      = 0;
+    endtask
+
     // Reset agent
     task reset();
         predictions_count = 0;
@@ -156,75 +224,23 @@ class agent_esp_acc;
     task run(input int unsigned load_trees,
              input int unsigned burst_len);
 
-        bit [31:0] clk_stamp1, clk_stamp2; 
+        if (burst_len) burst_len_1 = burst_len;
 
-        if (burst_len)
-            burst_len_1 = burst_len;
+        config_acc(load_trees, burst_len);
 
-        // CONFIG PHASE: apply registers
-        esp_if.conf_info_load_trees = load_trees;
-        esp_if.conf_info_burst_len = burst_len;
-        @(posedge esp_if.clk);
-        esp_if.conf_done      = 1;
-        @(posedge esp_if.clk);
-        esp_if.conf_done      = 0;
+        dma_block: fork
+            if (burst_len || load_trees) dma_read();
+            dma_write();
+        join_none
 
-        // Load trees into memory if requested
-        if (burst_len || load_trees) begin
-            // READ CONTROL: handshake
-            esp_if.dma_read_ctrl_ready = 1;
-            wait (esp_if.dma_read_ctrl_valid && esp_if.dma_read_ctrl_ready);
-            @(posedge esp_if.clk);
-            read_index  = esp_if.dma_read_ctrl_data_index;
-            read_length = esp_if.dma_read_ctrl_data_length;
-            esp_if.dma_read_ctrl_ready = 0;
-    
-            // READ CHANNEL: supply data beats
-            esp_if.dma_read_chnl_valid = 1;
-            for (int i = 0; i < read_length; ) begin
-                esp_if.dma_read_chnl_data = mem[read_index + i];
-                i++;
-                @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
-            end
-            esp_if.dma_read_chnl_valid = 0;
-            @(posedge esp_if.clk);
-        end
+        wait_acc_done();
+        disable dma_block;
 
-        // WRITE CONTROL: handshake
-        esp_if.dma_write_ctrl_ready = 1;
-        wait (esp_if.dma_write_ctrl_valid && esp_if.dma_write_ctrl_ready);
-        @(posedge esp_if.clk);
-        write_index  = esp_if.dma_write_ctrl_data_index;
-        write_length = esp_if.dma_write_ctrl_data_length;
-        esp_if.dma_write_ctrl_ready = 0;
-
-        // WRITE CHANNEL: capture returned data
-        esp_if.dma_write_chnl_ready = 1;
-        for (int i = 0; i < write_length; ) begin
-            if (i<write_length-1) begin
-                @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
-                mem[write_index + i] = esp_if.dma_write_chnl_data;
-            end else begin
-                // Last beat contains clock stamps
-                @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
-                {clk_stamp1, clk_stamp2} = esp_if.dma_write_chnl_data;
-                $display("Clock stamps: send %0d, process %0d clk cicles", clk_stamp1, clk_stamp2);
-            end
-            i++;
-        end
-
-        esp_if.dma_write_chnl_ready = 0;
-        @(posedge esp_if.clk);
-
-        // WAIT for accelerator to assert acc_done
-        wait (esp_if.acc_done == 1);
-        @(posedge esp_if.clk);
-
-        // Read predictions from memory
+        // Read predictions from "memory"
         if (!load_trees)
             read_predictions(burst_len_1, (burst_len) ? 1 : 0);
 
-endtask
+    endtask
 
     // Generate a gold standard for the expected output
     task automatic gold_gen(input bit[63:0] trees [N_NODES*N_TREES-1:0], 
