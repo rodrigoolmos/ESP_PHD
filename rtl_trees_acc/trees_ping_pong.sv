@@ -8,6 +8,10 @@ module trees_ping_pong #(
     input  logic                                    	clk,
     input  logic                                    	rst_n,
     input  logic                                    	start,
+    output logic                                    	idle,
+
+    input  logic                                    	m_ping_pong, // 1: ping, 0: pong
+    input  logic                                    	e_ping_pong, // 1: ping, 0: pong
 
     input  logic                                    	load_trees,
     input  logic [$clog2(N_NODE_AND_LEAFS)-1:0]     	n_node,
@@ -38,14 +42,22 @@ module trees_ping_pong #(
     logic [7:0]                    	prediction_set;
     logic [7:0][7:0]                prediction_packed;
 	logic [MAX_BURST_BITS:0] 		prediction_index;
+	logic [MAX_BURST_BITS:0] 		n_starts;
 
 
 	(* ram_style = "block" *) 
-	logic [63:0] 						features_mem [MAX_BURST*HALF_N_FEATURE-1:0];
+	logic [63:0] 						features_mem_ping [MAX_BURST*HALF_N_FEATURE-1:0];
+	logic								load_features_ping;
+
+	(* ram_style = "block" *) 
+	logic [63:0] 						features_mem_pong [MAX_BURST*HALF_N_FEATURE-1:0];
+	logic								load_features_pong;
+
 	logic [N_FEATURE-1:0][31:0] 		features_mux;
 	logic [HALF_N_FEATURE-1:0][63:0] 	features_ping;
 	logic [HALF_N_FEATURE-1:0][63:0] 	features_pong;
 	logic [$clog2(N_FEATURE)-1:0] 		feature_index;
+	logic [$clog2(MAX_BURST):0]			burst_len_ff;
 	logic [31:0] 						burst_index;
 
 	logic 								c_ping_ready;
@@ -90,9 +102,18 @@ module trees_ping_pong #(
 	// ---------------------------------------------------
 	//  LOAD FEATURES
 	// ---------------------------------------------------
+	always_comb begin
+		load_features_ping = load_features && m_ping_pong;
+		load_features_pong = load_features && !m_ping_pong;		
+	end
+
 	always_ff @(posedge clk)
-    	if (load_features)
-    	  	features_mem[feature_addr] <= features2;
+    	if (load_features_ping)
+    	  	features_mem_ping[feature_addr] <= features2;
+
+	always_ff @(posedge clk)
+    	if (load_features_pong)
+    	  	features_mem_pong[feature_addr] <= features2;
 
 	// ---------------------------------------------------
 	//  LOAD PREDICTIONS
@@ -130,6 +151,7 @@ module trees_ping_pong #(
 						burst_index <= 0;
 						feature_index <= 0;
 						c_ping_pong <= 1;
+						burst_len_ff <= burst_len;
 					end
 				end
 				C_WAIT: begin
@@ -138,14 +160,15 @@ module trees_ping_pong #(
 						copy_st <= C_PING;
 					if (c_pong_ready && !c_ping_pong)
 						copy_st <= C_PONG;
-					if (burst_index == burst_len) begin
+					if (burst_index == burst_len_ff) begin
 						copy_st <= C_IDLE;
 					end
 				end
 				C_PING: begin
 					if (feature_index < HALF_N_FEATURE) begin
-						features_ping[feature_index] <= 
-							features_mem[feature_index + {burst_index, {$clog2(HALF_N_FEATURE){1'b0}}}];
+						features_ping[feature_index] <= e_ping_pong ?
+							features_mem_ping[feature_index + {burst_index, {$clog2(HALF_N_FEATURE){1'b0}}}] :
+							features_mem_pong[feature_index + {burst_index, {$clog2(HALF_N_FEATURE){1'b0}}}];
 						feature_index <= feature_index + 1;
 						p_ping_ready <= 0;
 					end else begin
@@ -157,8 +180,9 @@ module trees_ping_pong #(
 				end
 				C_PONG: begin
 					if (feature_index < HALF_N_FEATURE) begin
-						features_pong[feature_index] <= 
-							features_mem[feature_index + {burst_index, {$clog2(HALF_N_FEATURE){1'b0}}}];
+						features_pong[feature_index] <= e_ping_pong ?
+							features_mem_ping[feature_index + {burst_index, {$clog2(HALF_N_FEATURE){1'b0}}}] :
+							features_mem_pong[feature_index + {burst_index, {$clog2(HALF_N_FEATURE){1'b0}}}];
 						feature_index <= feature_index + 1;
 						p_pong_ready <= 0;
 					end else begin
@@ -182,12 +206,18 @@ module trees_ping_pong #(
 			c_pong_ready <= 1;
 			p_ping_pong <= 1;
 			start_set <= 0;
+			done <= 0;
+			idle <= 1;
+			n_starts <= 0;
 		end else begin
 			case (proc_st)
 				P_IDLE: begin
 					start_set <= 0;
 					done <= 0;
+					idle <= 1;
 					if (start) begin
+						idle <= 0;
+						n_starts <= 0;
 						proc_st <= P_WAIT;
 						c_ping_ready <= 1;
 						c_pong_ready <= 1;
@@ -196,28 +226,32 @@ module trees_ping_pong #(
 				end
 				P_WAIT: begin
 					c_ping_ready <= idle_sys;
-					if (p_ping_ready && p_ping_pong && idle_sys) begin
-						proc_st <= P_PING;
-						start_set <= 1;
-						c_ping_ready <= 0;
-						/* 
-						Each 64-bit word in features_ping contains two 32-bit features;
-						the assignment to features_mux splits them to feed the tree ensemble.
-						*/
-						features_mux <= features_ping;
-					end
 					c_pong_ready <= idle_sys;
-					if (p_pong_ready && !p_ping_pong && idle_sys) begin
-						proc_st <= P_PONG;
-						start_set <= 1;
-						c_pong_ready <= 0;
-						/* 
-						Each 64-bit word in features_ping contains two 32-bit features;
-						the assignment to features_mux splits them to feed the tree ensemble.
-						*/
-						features_mux <= features_pong;
+					if (n_starts < burst_len_ff) begin
+						if (p_ping_ready && p_ping_pong && idle_sys) begin
+							proc_st <= P_PING;
+							start_set <= 1;
+							n_starts <= n_starts + 1;
+							c_ping_ready <= 0;
+							/* 
+							Each 64-bit word in features_ping contains two 32-bit features;
+							the assignment to features_mux splits them to feed the tree ensemble.
+							*/
+							features_mux <= features_ping;
+						end
+						if (p_pong_ready && !p_ping_pong && idle_sys) begin
+							proc_st <= P_PONG;
+							start_set <= 1;
+							n_starts <= n_starts + 1;
+							c_pong_ready <= 0;
+							/* 
+							Each 64-bit word in features_ping contains two 32-bit features;
+							the assignment to features_mux splits them to feed the tree ensemble.
+							*/
+							features_mux <= features_pong;
+						end
 					end
-					if (prediction_index == burst_len) begin
+					if (prediction_index == burst_len_ff) begin
 						proc_st <= P_IDLE;
 						done <= 1;
 					end

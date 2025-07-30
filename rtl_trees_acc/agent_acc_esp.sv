@@ -97,7 +97,7 @@ class agent_esp_acc;
         int i, j;
         for (i = 0; i < n_predictions/8; i++) begin
             for (j=0; j<8; ++j) begin
-                predictions_hw[predictions_count++] = mem[read_index + i][8*j+: 8];
+                predictions_hw[predictions_count++] = mem[i][8*j+: 8];
                 $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
                 if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1] && check_mismatches) begin
                     mismatches_count++;
@@ -109,7 +109,7 @@ class agent_esp_acc;
             end
         end
         for (j=0; j<n_predictions%8; ++j) begin
-            predictions_hw[predictions_count++] = mem[read_index + i][8*j+: 8];
+            predictions_hw[predictions_count++] = mem[i][8*j+: 8];
             $display("Prediction %0d: %0h", predictions_count, predictions_hw[predictions_count-1]);
             if (predictions_hw[predictions_count-1] != predictions_sw[predictions_count-1] && check_mismatches) begin
                 mismatches_count++;
@@ -165,6 +165,8 @@ class agent_esp_acc;
             if (i<write_length-1) begin
                 @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
                 mem[write_index + i] = esp_if.dma_write_chnl_data;
+		        $display("Writing to memory address %0h Data %0h", 
+                            esp_if.dma_write_chnl_data, write_index + i);
             end else begin
                 // Last beat contains clock stamps
                 @(posedge esp_if.clk iff esp_if.dma_write_chnl_ready && esp_if.dma_write_chnl_valid);
@@ -224,16 +226,23 @@ class agent_esp_acc;
     task run(input int unsigned load_trees,
              input int unsigned burst_len);
 
+        logic dma_active = 1;
         if (burst_len) burst_len_1 = burst_len;
 
         config_acc(load_trees, burst_len);
 
         dma_block: fork
-            if (burst_len || load_trees) dma_read();
-            dma_write();
+            while (dma_active) begin
+                if (burst_len || load_trees) dma_read();
+            end
+
+            while (dma_active) begin
+                dma_write();
+            end
         join_none
 
         wait_acc_done();
+        dma_active = 0;
         disable dma_block;
 
         // Read predictions from "memory"

@@ -5,11 +5,13 @@ module tb_esp_trees;
     
     const integer t_clk    = 10;    // Clock period 100MHz
 
-    parameter N_TREES          					= 128;
-    parameter N_NODES         					= 256;
-    parameter N_FEATURE        					= 32;
-    parameter N_CLASES        					= 32;
-    parameter MAX_BURST        					= 5000;
+    parameter N_TREES          					= 128;  // Number of trees
+    parameter N_NODES         					= 256;  // Number of nodes per tree (power of 2)
+    parameter N_FEATURE        					= 32;   // Number of features per sample
+    parameter N_CLASES        					= 32;   // Number of classes
+    parameter MAX_BURST        					= 128;  // Power of 2 and > 8
+
+    parameter N_ITERATIONS = 10; // Number of iterations for the testbench
 
     parameter N_SAMPLES = 10000;    // Number of samples
     parameter COLUMNAS = 33;        // 32 features + 1 label
@@ -164,56 +166,32 @@ module tb_esp_trees;
             labels_mem
         );
 
-        // Load the trees into the RTL module
-        agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, 0, trees);
-        agent_esp_acc_inst.run(1, 0);
-
-        while (data_processed < N_SAMPLES) begin
-            samples_2_process = $urandom_range(1, MAX_BURST);
-            if ((data_processed + samples_2_process) >= N_SAMPLES) begin
-                samples_2_process = N_SAMPLES - data_processed;
+        for (int i=0; i<N_ITERATIONS; ++i) begin
+            
+            // Load the trees into the RTL module
+            agent_esp_acc_inst.load_memory(0, N_TREES*N_NODES, 0, trees);
+            agent_esp_acc_inst.run(1, 0);
+            data_processed = 0;
+            offset_processed = 0;
+            while (data_processed < N_SAMPLES) begin
+                samples_2_process = $urandom_range(1, MAX_BURST*5);
+                if ((data_processed + samples_2_process) >= N_SAMPLES) begin
+                    samples_2_process = N_SAMPLES - data_processed;
+                end
+                $display("Data processed: %0d, Samples to process: %0d", data_processed, samples_2_process);
+                // Load the features into the RTL module
+                load_length = samples_2_process * (COLUMNAS-1)/2; // 2 features per beat
+                agent_esp_acc_inst.load_memory(0, load_length, offset_processed, features_mem_64);
+                // Run the RTL module with the features
+                agent_esp_acc_inst.run(0, samples_2_process);
+                data_processed += samples_2_process;
+                offset_processed += load_length;
             end
-            $display("Data processed: %0d, Samples to process: %0d", data_processed, samples_2_process);
-            // Load the features into the RTL module
-            load_length = samples_2_process * (COLUMNAS-1)/2; // 2 features per beat
-            agent_esp_acc_inst.load_memory(0, load_length, offset_processed, features_mem_64);
-            // Run the RTL module with the features
-            agent_esp_acc_inst.run(0, samples_2_process);
-            data_processed += samples_2_process;
-            offset_processed += load_length;
+    
+            agent_esp_acc_inst.print_metrics(labels_mem);
+            agent_esp_acc_inst.reset(); // Reset the agent for next processing
         end
 
-        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
-        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
-        agent_esp_acc_inst.print_metrics(labels_mem);
-        agent_esp_acc_inst.reset(); // Reset the agent for next processing
-
-        ///////////////////////////////////////////////////////////////////////
-
-        #(t_clk*20000) @(posedge esp_acc_if_inst.clk);
-
-        data_processed = 0;
-        offset_processed = 0;
-        while (data_processed < N_SAMPLES) begin
-            samples_2_process = $urandom_range(1, MAX_BURST);
-            if ((data_processed + samples_2_process) >= N_SAMPLES) begin
-                samples_2_process = N_SAMPLES - data_processed;
-            end
-            $display("Data processed: %0d, Samples to process: %0d", data_processed, samples_2_process);
-            // Load the features into the RTL module
-            load_length = samples_2_process * (COLUMNAS-1)/2; // 2 features per beat
-            agent_esp_acc_inst.load_memory(0, load_length, offset_processed, features_mem_64);
-            // Run the RTL module with the features
-            agent_esp_acc_inst.run(0, samples_2_process);
-            data_processed += samples_2_process;
-            offset_processed += load_length;
-        end
-
-        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
-        agent_esp_acc_inst.run(0, 0);   // TEST reprocessing with no more data
-
-
-        agent_esp_acc_inst.print_metrics(labels_mem);
 
         $stop;
 
