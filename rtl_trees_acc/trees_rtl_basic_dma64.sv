@@ -180,6 +180,7 @@ module trees_rtl_basic_dma64 #(
 					start <= 0;
 					if (samples_processed == samples_2_process && idle) begin
 						read_e <= IDLE_R;
+						dma_read_chnl_ready <= 0;
 						load_features <= 0;
 					end
 					if (dma_read_ctrl_valid && dma_read_ctrl_ready)
@@ -211,7 +212,7 @@ module trees_rtl_basic_dma64 #(
 
 						dma_read_ctrl_data_size   <= 3'b011;
 						dma_read_ctrl_data_user   <= 0;
-						dma_read_chnl_ready       <= 1;
+						dma_read_chnl_ready       <= samples_processed + burst_len < samples_2_process;
 						dma_read_ctrl_data_index  <= (samples_processed + burst_len)*(N_FEATURE ) >> 1;
 						m_ping_pong <= !m_ping_pong;
 						e_ping_pong <= m_ping_pong;
