@@ -9,7 +9,7 @@ module tb_esp_trees;
     parameter N_NODES         					= 256;  // Number of nodes per tree (power of 2)
     parameter N_FEATURE        					= 32;   // Number of features per sample
     parameter N_CLASES        					= 32;   // Number of classes
-    parameter MAX_BURST        					= 128;  // Power of 2 and > 8
+    parameter MAX_BURST        					= 16;  // Power of 2 and > 8
 
     parameter N_ITERATIONS = 10; // Number of iterations for the testbench
 
