@@ -135,6 +135,7 @@ module trees_rtl_basic_dma64 #(
 				IDLE_R: begin
 					write_trees_clk <= 0;
 					samples_processed <= 0;
+					start <= 0;
 
 					if (conf_done && conf_info_load_trees[0]) begin
 						dma_read_ctrl_valid       <= 1;
@@ -144,7 +145,7 @@ module trees_rtl_basic_dma64 #(
 						dma_read_chnl_ready       <= 1;
 						dma_read_ctrl_data_index  <= 0;
 						read_e <= DMA_TREES;
-					end else if (conf_done) begin
+					end else if (conf_done && conf_info_burst_len != 0) begin
 						m_ping_pong <= 1; // Start with ping
 						e_ping_pong <= 0;
 						dma_read_ctrl_valid       <= 1;
@@ -178,11 +179,6 @@ module trees_rtl_basic_dma64 #(
 				DMA_PONG_PING: begin
 					load_features <= 1;
 					start <= 0;
-					if (samples_processed == samples_2_process && idle) begin
-						read_e <= IDLE_R;
-						dma_read_chnl_ready <= 0;
-						load_features <= 0;
-					end
 					if (dma_read_ctrl_valid && dma_read_ctrl_ready)
 						dma_read_ctrl_valid <= 0;
 
@@ -200,23 +196,39 @@ module trees_rtl_basic_dma64 #(
 				end
 				START_TREES: begin
 					if(idle && write_e == IDLE_W) begin
-						burst_write <= burst_len;
-						start <= 1;
-						samples_processed <= samples_processed + burst_len;
+						if(samples_processed + burst_len < samples_2_process) begin
+							burst_write <= burst_len;
+							start <= 1;
+							samples_processed <= samples_processed + burst_len;
 
-						dma_read_ctrl_valid       <= 1;
-						// FEATURES COME IN PAIRS
-						dma_read_ctrl_data_length <= (samples_2_process - burst_len - samples_processed) < MAX_BURST ?
-														((samples_2_process - burst_len - samples_processed) * N_FEATURE + 1) >> 1 :
-														(MAX_BURST * N_FEATURE + 1) >> 1;
+							dma_read_ctrl_valid       <= 1;
+							// FEATURES COME IN PAIRS
+							dma_read_ctrl_data_length <= (samples_2_process - burst_len - samples_processed) < MAX_BURST ?
+															((samples_2_process - burst_len - samples_processed) * N_FEATURE + 1) >> 1 :
+															(MAX_BURST * N_FEATURE + 1) >> 1;
 
-						dma_read_ctrl_data_size   <= 3'b011;
-						dma_read_ctrl_data_user   <= 0;
-						dma_read_chnl_ready       <= samples_processed + burst_len < samples_2_process;
-						dma_read_ctrl_data_index  <= (samples_processed + burst_len)*(N_FEATURE ) >> 1;
-						m_ping_pong <= !m_ping_pong;
-						e_ping_pong <= m_ping_pong;
-						read_e  <= DMA_PONG_PING;
+							dma_read_ctrl_data_size   <= 3'b011;
+							dma_read_ctrl_data_user   <= 0;
+							dma_read_chnl_ready       <= 1;
+							dma_read_ctrl_data_index  <= (samples_processed + burst_len)*(N_FEATURE ) >> 1;
+							m_ping_pong <= !m_ping_pong;
+							e_ping_pong <= m_ping_pong;
+							read_e  <= DMA_PONG_PING;
+						end else begin
+							burst_write <= burst_len;
+							start <= 1;
+							samples_processed <= samples_processed + burst_len;
+							dma_read_ctrl_valid       <= 0;
+							dma_read_ctrl_data_length <= 0;
+
+							dma_read_ctrl_data_size   <= 3'b011;
+							dma_read_ctrl_data_user   <= 0;
+							dma_read_chnl_ready       <= 0;
+							dma_read_ctrl_data_index  <= 0;
+							e_ping_pong <= m_ping_pong;
+							read_e  <= IDLE_R;
+						end
+
 					end
 				end
 				default: begin
