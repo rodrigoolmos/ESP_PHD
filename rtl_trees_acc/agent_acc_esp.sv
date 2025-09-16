@@ -142,6 +142,10 @@ class agent_esp_acc;
                 esp_if.dma_read_chnl_data = mem[read_index + i];
                 i++;
                 @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
+                // random delay to simulate latency
+                esp_if.dma_read_chnl_valid = 0;
+                repeat ($urandom_range(0,1)) @(posedge esp_if.clk);
+                esp_if.dma_read_chnl_valid = 1;
             end
             esp_if.dma_read_chnl_valid = 0;
             @(posedge esp_if.clk);
