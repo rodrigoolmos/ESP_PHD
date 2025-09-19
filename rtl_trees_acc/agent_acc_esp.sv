@@ -135,7 +135,12 @@ class agent_esp_acc;
             read_index  = esp_if.dma_read_ctrl_data_index;
             read_length = esp_if.dma_read_ctrl_data_length;
             esp_if.dma_read_ctrl_ready = 0;
-    
+
+            assert (read_length != 0) else begin
+                $display("Error: read_length can not be 0");
+                $stop;
+            end
+
             // READ CHANNEL: supply data beats
             esp_if.dma_read_chnl_valid = 1;
             for (int i = 0; i < read_length; ) begin
@@ -162,6 +167,11 @@ class agent_esp_acc;
         write_index  = esp_if.dma_write_ctrl_data_index;
         write_length = esp_if.dma_write_ctrl_data_length;
         esp_if.dma_write_ctrl_ready = 0;
+
+        assert (write_length != 0) else begin
+            $display("Error: write_length can not be 0");
+            $stop;
+        end 
 
         // WRITE CHANNEL: capture returned data
         esp_if.dma_write_chnl_ready = 1;
