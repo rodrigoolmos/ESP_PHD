@@ -3,7 +3,7 @@ module trees_rtl_basic_dma64 #(
 	parameter N_NODE_AND_LEAFS 					= 256,		// POWER OF 2
 	parameter N_FEATURE        					= 32,
 	parameter N_CLASES  		       			= 32,
-	parameter MAX_BURST        					= 4096 	// POWER OF 2 AND > 8
+	parameter MAX_BURST        					= 128 		// POWER OF 2 AND > 8
 ) (
 	input  logic        clk,
 	input  logic        rst,                          // Active-low reset
@@ -130,6 +130,8 @@ module trees_rtl_basic_dma64 #(
 			start 						<= 0;
 			load_features				<= 0;
 			burst_len					<= 0;
+			clk_stamp1 <= 0;
+			clk_stamp2 <= 0;
 		end else begin
 			case (read_e)
 				IDLE_R: begin
@@ -144,6 +146,8 @@ module trees_rtl_basic_dma64 #(
 						dma_read_ctrl_data_user   <= 0;
 						dma_read_chnl_ready       <= 1;
 						dma_read_ctrl_data_index  <= 0;
+						clk_stamp1 <= 32'h526F6472;
+						clk_stamp2 <= 32'h69676F00;
 						read_e <= DMA_TREES;
 					end else if (conf_done && conf_info_burst_len != 0) begin
 						m_ping_pong <= 1; // Start with ping
@@ -158,6 +162,8 @@ module trees_rtl_basic_dma64 #(
 						dma_read_ctrl_data_user   <= 0;
 						dma_read_chnl_ready       <= 1;
 						dma_read_ctrl_data_index  <= 0;
+						clk_stamp1 <= 0;
+						clk_stamp2 <= 0;
 						read_e <= DMA_PONG_PING;
 					end
 				end
@@ -177,6 +183,7 @@ module trees_rtl_basic_dma64 #(
 					end					
 				end
 				DMA_PONG_PING: begin
+					clk_stamp1 <= clk_stamp1 + 1;
 					load_features <= 1;
 					start <= 0;
 					if (dma_read_ctrl_valid && dma_read_ctrl_ready)
@@ -195,6 +202,7 @@ module trees_rtl_basic_dma64 #(
 					end
 				end
 				START_TREES: begin
+					clk_stamp2 <= clk_stamp2 + 1;
 					if(idle && write_e == IDLE_W) begin
 						if(samples_processed + burst_len < samples_2_process) begin
 							burst_write <= burst_len;
@@ -322,7 +330,7 @@ module trees_rtl_basic_dma64 #(
 			else
 				dma_write_chnl_data = prediction;
 		end else begin
-			dma_write_chnl_data = 64'd0;
+			dma_write_chnl_data = {clk_stamp1, clk_stamp2};
 		end
 	end
 
