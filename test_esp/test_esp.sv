@@ -89,7 +89,7 @@ module test_esp;
     assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_user)) 
         else $error("dma_read_ctrl_data_user shouldn't change when dma_read_ctrl_valid is high");
 
-    ////////   READ ASSERTIONS   ////////
+    ////////   WRITE ASSERTIONS   ////////
     initial begin
         int remaining;
         forever begin
@@ -120,7 +120,7 @@ module test_esp;
         end
     end
 
-    ////////   WRITE ASSERTIONS   ////////
+    ////////   READ ASSERTIONS   ////////
     initial begin
         int remaining;
         forever begin
