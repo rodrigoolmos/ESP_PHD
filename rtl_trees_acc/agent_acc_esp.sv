@@ -37,6 +37,215 @@ interface esp_acc_if;
     logic dma_write_chnl_valid;             // From accelerator: high when write data is valid
     logic [63:0] dma_write_chnl_data;       // Data beat sent to memory (typically 64-bit)
 
+
+    ////////////////////////
+    /* assertions section */
+    ////////////////////////
+
+    property b_changes_only_on_a_rise(logic sigA, logic [31:0] sigB);
+        @(posedge clk) disable iff (!rst)
+            $changed(sigB) |-> $changed(sigA) || !sigA;
+    endproperty
+
+
+    property p_ctrl_stable_while_wait(valid, ready, idx,len,sz,usr);
+    @(posedge clk) disable iff (!rst)
+        (valid && !ready) |=> ($stable(idx) && $stable(len) && $stable(sz) && $stable(usr));
+    endproperty
+
+    assert property (p_ctrl_stable_while_wait(
+    dma_write_ctrl_valid, dma_write_ctrl_ready,
+    dma_write_ctrl_data_index, dma_write_ctrl_data_length,
+    dma_write_ctrl_data_size, dma_write_ctrl_data_user))
+    else $error("[WRITE CTRL] Error back-pressure");
+
+    assert property (p_ctrl_stable_while_wait(
+    dma_read_ctrl_valid, dma_read_ctrl_ready,
+    dma_read_ctrl_data_index, dma_read_ctrl_data_length,
+    dma_read_ctrl_data_size, dma_read_ctrl_data_user))
+    else $error("[READ CTRL] Error back-pressure");
+
+    // CHECK acc_done pulse
+    assert property (@(posedge clk) disable iff (!rst)
+        $rose(acc_done) |-> ##1 !acc_done
+    ) else $error("acc_done pulse should be one cycle only");
+
+    ////////   WRITE CONTROL ASSERTIONS   ////////
+    // CHECK dma_write_ctrl_valid read_ctrl_ready handshake
+    assert property (@(posedge clk) disable iff (!rst)
+        dma_write_ctrl_valid && dma_write_ctrl_ready |-> ##1 !dma_write_ctrl_valid
+    ) else $error("dma_write_ctrl_valid should be low one cycle after dma_write_ctrl_valid && dma_write_ctrl_ready");
+    // CHECK dma_write_ctrl_data_length stability
+    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_length)) 
+        else $error("dma_write_ctrl_data_length shouldn't change when dma_write_ctrl_valid is high");
+    // CHECK dma_write_ctrl_data_index stability
+    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_index)) 
+        else $error("dma_write_ctrl_data_index shouldn't change when dma_write_ctrl_valid is high");
+    // CHECK dma_write_ctrl_data_size stability
+    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_size)) 
+        else $error("dma_write_ctrl_data_size shouldn't change when dma_write_ctrl_valid is high");
+    // CHECK dma_write_ctrl_data_user stability
+    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_user)) 
+        else $error("dma_write_ctrl_data_user shouldn't change when dma_write_ctrl_valid is high");
+
+    ////////   READ CONTROL ASSERTIONS   ////////
+    // CHECK read_ctrl_valid read_ctrl_ready handshake
+    assert property (@(posedge clk) disable iff (!rst)
+        dma_read_ctrl_valid && dma_read_ctrl_ready |-> ##1 !dma_read_ctrl_valid
+    ) else $error("dma_read_ctrl_valid should be low one cycle after dma_read_ctrl_valid && dma_read_ctrl_ready");
+    // CHECK dma_read_ctrl_data_length stability
+    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_length)) 
+        else $error("dma_read_ctrl_data_length shouldn't change when dma_read_ctrl_valid is high");
+    // CHECK dma_read_ctrl_data_index stability
+    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_index)) 
+        else $error("dma_read_ctrl_data_index shouldn't change when dma_read_ctrl_valid is high");
+    // CHECK dma_read_ctrl_data_size stability
+    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_size)) 
+        else $error("dma_read_ctrl_data_size shouldn't change when dma_read_ctrl_valid is high");
+    // CHECK dma_read_ctrl_data_user stability
+    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_user)) 
+        else $error("dma_read_ctrl_data_user shouldn't change when dma_read_ctrl_valid is high");
+
+    ////////   WRITE ASSERTIONS   ////////
+    // Normal write transaction
+    initial begin
+        int remaining;
+        forever begin
+            @(posedge clk iff dma_write_ctrl_ready && dma_write_ctrl_valid);
+            remaining = dma_write_ctrl_data_length;
+            @(posedge clk);
+            if (remaining == 0) begin
+                $error("dma_write_ctrl_data_length should be greater than 0");
+            end
+
+            fork
+            begin : data_beats
+                for (int i = 0; i < remaining; i++) begin
+                @(posedge clk iff dma_write_chnl_ready && dma_write_chnl_valid);
+                end
+                remaining = 0;
+            end
+
+            begin : guard_new_start
+                @(posedge clk iff dma_write_ctrl_ready && dma_write_ctrl_valid);
+                #0;
+                if (remaining > 0) begin
+                $error("New ctrl before finishing previous transaction data");
+                end
+            end
+            join_any
+            disable fork;
+        end
+    end
+    // back-pressure WRITE
+    assert property (@(posedge clk)disable iff (!rst)
+        (dma_write_chnl_valid && !dma_write_chnl_ready) |=> 
+            (dma_write_chnl_valid && $stable(dma_write_chnl_data))
+    ) else $error("back-pressure WRITE not been handled correctly");
+
+    // CHECK data/valid stability under back-pressure
+    assert property (@(posedge clk) disable iff(!rst)
+        (dma_read_chnl_valid && !dma_read_chnl_ready) |=> 
+            (dma_read_chnl_valid && $stable(dma_read_chnl_data)))
+    else $error("back-pressure READ not been handled correctly");
+
+    ////////   READ ASSERTIONS   ////////
+    initial begin
+        int remaining;
+        forever begin
+            @(posedge clk iff dma_read_ctrl_ready && dma_read_ctrl_valid);
+            remaining = dma_read_ctrl_data_length;
+            @(posedge clk);
+            if (remaining == 0) begin
+                $error("dma_read_ctrl_data_length should be greater than 0");
+            end
+
+            fork
+            begin : data_beats
+                for (int i = 0; i < remaining; i++) begin
+                @(posedge clk iff dma_read_chnl_ready && dma_read_chnl_valid);
+                end
+                remaining = 0;
+            end
+
+            begin : guard_new_start
+                @(posedge clk iff dma_read_ctrl_ready && dma_read_ctrl_valid);
+                #0;
+                if (remaining > 0) begin
+                $error("New ctrl before finishing previous transaction data");
+                end
+            end
+            join_any
+            disable fork;
+        end
+    end
+
+    ////////   conf_done -> acc_done   ////////
+    initial begin
+        typedef enum logic { w_conf_done, w_acc_done } t_state;
+	    t_state state;
+        state = w_conf_done;
+        forever begin
+            @(posedge clk);
+            case (state)
+                w_conf_done: begin
+                    if (conf_done)
+                        state = w_acc_done;
+                    else if (acc_done)
+                        $error("acc_done should not be high before conf_done");
+
+                end
+                w_acc_done: begin
+                    if (acc_done)
+                        state = w_conf_done;
+                    else if (conf_done)
+                        $error("conf_done should not be high before acc_done");
+
+                end
+            endcase
+        end
+    end
+    // CHECK conf_done -> acc_done
+    cover property (@(posedge clk) disable iff (rst == 1'b0)
+        conf_done |-> ##[1:$] acc_done
+    );
+
+    function automatic bit size_ok(input [2:0] s);
+    return (s==3'b000) || (s==3'b001) || (s==3'b010) || (s==3'b011);
+    endfunction
+
+    assert property (@(posedge clk) disable iff(!rst)
+    (dma_write_ctrl_valid && dma_write_ctrl_ready) |-> size_ok(dma_write_ctrl_data_size))
+    else $error("[WRITE CTRL] size out of codification");
+
+    assert property (@(posedge clk) disable iff(!rst)
+    (dma_read_ctrl_valid && dma_read_ctrl_ready) |-> size_ok(dma_read_ctrl_data_size))
+    else $error("[READ CTRL] size out of codification");
+
+    assert property (@(posedge clk) disable iff(!rst)
+    dma_write_ctrl_valid |-> !$isunknown({dma_write_ctrl_data_index,
+                                            dma_write_ctrl_data_length,
+                                            dma_write_ctrl_data_size,
+                                            dma_write_ctrl_data_user}))
+    else $error("[WRITE CTRL] X/Z in camps VALID=1");
+
+    assert property (@(posedge clk) disable iff(!rst)
+    dma_read_ctrl_valid |-> !$isunknown({dma_read_ctrl_data_index,
+                                        dma_read_ctrl_data_length,
+                                        dma_read_ctrl_data_size,
+                                        dma_read_ctrl_data_user}))
+    else $error("[READ CTRL] X/Z in camps VALID=1");
+
+
+    assert property (@(posedge clk) disable iff(!rst)
+        dma_write_chnl_valid |-> !$isunknown(dma_write_chnl_data))
+    else $error("[WRITE DATA] X/Z with VALID=1");
+
+    assert property (@(posedge clk) disable iff(!rst)
+        dma_read_chnl_valid |-> !$isunknown(dma_read_chnl_data))
+    else $error("[READ DATA] X/Z with VALID=1");
+
+
 endinterface
 
 
@@ -127,8 +336,15 @@ class agent_esp_acc;
         @(posedge esp_if.clk);
     endtask
 
+    local task automatic back_pressure(ref logic signal);
+        signal = 0;
+        repeat($urandom_range(0,3)) @(posedge esp_if.clk);
+    endtask
+
+
     local task dma_read();
             // READ CONTROL: handshake
+            back_pressure(esp_if.dma_read_ctrl_ready);
             esp_if.dma_read_ctrl_ready = 1;
             wait (esp_if.dma_read_ctrl_valid && esp_if.dma_read_ctrl_ready);
             @(posedge esp_if.clk);
@@ -147,9 +363,7 @@ class agent_esp_acc;
                 esp_if.dma_read_chnl_data = mem[read_index + i];
                 i++;
                 @(posedge esp_if.clk iff esp_if.dma_read_chnl_ready && esp_if.dma_read_chnl_valid);
-                // random delay to simulate latency
-                esp_if.dma_read_chnl_valid = 0;
-                repeat ($urandom_range(0,1)) @(posedge esp_if.clk);
+                back_pressure(esp_if.dma_read_chnl_valid);
                 esp_if.dma_read_chnl_valid = 1;
             end
             esp_if.dma_read_chnl_valid = 0;
@@ -162,6 +376,7 @@ class agent_esp_acc;
 
         // WRITE CONTROL: handshake
         esp_if.dma_write_ctrl_ready = 1;
+        // back_pressure(esp_if.dma_write_ctrl_ready); ERROR REVIEW
         wait (esp_if.dma_write_ctrl_valid && esp_if.dma_write_ctrl_ready);
         @(posedge esp_if.clk);
         write_index  = esp_if.dma_write_ctrl_data_index;
@@ -174,6 +389,7 @@ class agent_esp_acc;
         end 
 
         // WRITE CHANNEL: capture returned data
+        back_pressure(esp_if.dma_write_chnl_ready);
         esp_if.dma_write_chnl_ready = 1;
         for (int i = 0; i < write_length; ) begin
             if (i<write_length-1) begin
@@ -188,6 +404,8 @@ class agent_esp_acc;
                 $display("Clock stamps: send %0d, process %0d clk cicles", clk_stamp1, clk_stamp2);
             end
             i++;
+            back_pressure(esp_if.dma_write_chnl_ready);
+            esp_if.dma_write_chnl_ready = 1;
         end
 
         esp_if.dma_write_chnl_ready = 0;
