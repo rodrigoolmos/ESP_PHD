@@ -70,6 +70,7 @@ module trees_rtl_basic_dma64 #(
 	logic                           start;
 	logic                           load_trees_s;
 	logic [31:0]                    clk_stamp1, clk_stamp2;
+	logic [31:0]                    clk_stamp1_ff, clk_stamp2_ff;
 	logic                           m_ping_pong;
 	logic                           e_ping_pong;
 	logic [31:0]                    burst_len;
@@ -320,17 +321,29 @@ module trees_rtl_basic_dma64 #(
 
 	end
 
+	always_ff @(posedge clk or negedge rst) begin
+		if (!rst) begin
+			clk_stamp1_ff <= 32'b0;
+			clk_stamp2_ff <= 32'b0;
+		end else begin
+			if (dma_write_chnl_ready && dma_write_chnl_valid) begin
+				clk_stamp1_ff <= clk_stamp1;
+				clk_stamp2_ff <= clk_stamp2;
+			end
+		end
+	end
+
 	always_comb begin
 		if (write_e == DMA_WRITE_TREES) begin
-			dma_write_chnl_data = {clk_stamp1, clk_stamp2};
-		end if (write_e == DMA_WRITE_PREDICTIONS) begin
+			dma_write_chnl_data = {clk_stamp1_ff, clk_stamp2_ff};
+		end else if (write_e == DMA_WRITE_PREDICTIONS) begin
 
 			if (wr_ptr == dma_write_ctrl_data_length-1)
-				dma_write_chnl_data = {clk_stamp1, clk_stamp2};
+				dma_write_chnl_data = {clk_stamp1_ff, clk_stamp2_ff};
 			else
 				dma_write_chnl_data = prediction;
 		end else begin
-			dma_write_chnl_data = {clk_stamp1, clk_stamp2};
+			dma_write_chnl_data = {clk_stamp1_ff, clk_stamp2_ff};
 		end
 	end
 
