@@ -375,8 +375,8 @@ class agent_esp_acc;
         bit [31:0] clk_stamp1, clk_stamp2; 
 
         // WRITE CONTROL: handshake
+        back_pressure(esp_if.dma_write_ctrl_ready);
         esp_if.dma_write_ctrl_ready = 1;
-        // back_pressure(esp_if.dma_write_ctrl_ready); ERROR REVIEW
         wait (esp_if.dma_write_ctrl_valid && esp_if.dma_write_ctrl_ready);
         @(posedge esp_if.clk);
         write_index  = esp_if.dma_write_ctrl_data_index;
