@@ -53,57 +53,57 @@ interface esp_acc_if;
         (valid && !ready) |=> ($stable(idx) && $stable(len) && $stable(sz) && $stable(usr));
     endproperty
 
-    assert property (p_ctrl_stable_while_wait(
+    write_ctrl_back_pressure: assert property (p_ctrl_stable_while_wait(
     dma_write_ctrl_valid, dma_write_ctrl_ready,
     dma_write_ctrl_data_index, dma_write_ctrl_data_length,
     dma_write_ctrl_data_size, dma_write_ctrl_data_user))
     else $error("[WRITE CTRL] Error back-pressure");
 
-    assert property (p_ctrl_stable_while_wait(
+    read_ctrl_back_pressure: assert property (p_ctrl_stable_while_wait(
     dma_read_ctrl_valid, dma_read_ctrl_ready,
     dma_read_ctrl_data_index, dma_read_ctrl_data_length,
     dma_read_ctrl_data_size, dma_read_ctrl_data_user))
     else $error("[READ CTRL] Error back-pressure");
 
     // CHECK acc_done pulse
-    assert property (@(posedge clk) disable iff (!rst)
+    acc_done_pulse: assert property (@(posedge clk) disable iff (!rst)
         $rose(acc_done) |-> ##1 !acc_done
     ) else $error("acc_done pulse should be one cycle only");
 
     ////////   WRITE CONTROL ASSERTIONS   ////////
     // CHECK dma_write_ctrl_valid read_ctrl_ready handshake
-    assert property (@(posedge clk) disable iff (!rst)
+    write_ctrl_valid_pulse: assert property (@(posedge clk) disable iff (!rst)
         dma_write_ctrl_valid && dma_write_ctrl_ready |-> ##1 !dma_write_ctrl_valid
     ) else $error("dma_write_ctrl_valid should be low one cycle after dma_write_ctrl_valid && dma_write_ctrl_ready");
     // CHECK dma_write_ctrl_data_length stability
-    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_length)) 
+    stable_w_length: assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_length)) 
         else $error("dma_write_ctrl_data_length shouldn't change when dma_write_ctrl_valid is high");
     // CHECK dma_write_ctrl_data_index stability
-    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_index)) 
+    stable_w_index: assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_index)) 
         else $error("dma_write_ctrl_data_index shouldn't change when dma_write_ctrl_valid is high");
     // CHECK dma_write_ctrl_data_size stability
-    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_size)) 
+    stable_w_size: assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_size)) 
         else $error("dma_write_ctrl_data_size shouldn't change when dma_write_ctrl_valid is high");
     // CHECK dma_write_ctrl_data_user stability
-    assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_user)) 
+    stable_w_user: assert property (b_changes_only_on_a_rise(dma_write_ctrl_valid, dma_write_ctrl_data_user)) 
         else $error("dma_write_ctrl_data_user shouldn't change when dma_write_ctrl_valid is high");
 
     ////////   READ CONTROL ASSERTIONS   ////////
     // CHECK read_ctrl_valid read_ctrl_ready handshake
-    assert property (@(posedge clk) disable iff (!rst)
+    read_ctrl_valid_pulse: assert property (@(posedge clk) disable iff (!rst)
         dma_read_ctrl_valid && dma_read_ctrl_ready |-> ##1 !dma_read_ctrl_valid
     ) else $error("dma_read_ctrl_valid should be low one cycle after dma_read_ctrl_valid && dma_read_ctrl_ready");
     // CHECK dma_read_ctrl_data_length stability
-    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_length)) 
+    stable_r_length: assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_length)) 
         else $error("dma_read_ctrl_data_length shouldn't change when dma_read_ctrl_valid is high");
     // CHECK dma_read_ctrl_data_index stability
-    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_index)) 
+    stable_r_index: assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_index)) 
         else $error("dma_read_ctrl_data_index shouldn't change when dma_read_ctrl_valid is high");
     // CHECK dma_read_ctrl_data_size stability
-    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_size)) 
+    stable_r_size: assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_size)) 
         else $error("dma_read_ctrl_data_size shouldn't change when dma_read_ctrl_valid is high");
     // CHECK dma_read_ctrl_data_user stability
-    assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_user)) 
+    stable_r_user: assert property (b_changes_only_on_a_rise(dma_read_ctrl_valid, dma_read_ctrl_data_user)) 
         else $error("dma_read_ctrl_data_user shouldn't change when dma_read_ctrl_valid is high");
 
     ////////   WRITE ASSERTIONS   ////////
@@ -138,13 +138,13 @@ interface esp_acc_if;
         end
     end
     // back-pressure WRITE
-    assert property (@(posedge clk)disable iff (!rst)
+    back_pressure_write: assert property (@(posedge clk)disable iff (!rst)
         (dma_write_chnl_valid && !dma_write_chnl_ready) |=> 
             (dma_write_chnl_valid && $stable(dma_write_chnl_data))
     ) else $error("back-pressure WRITE not been handled correctly");
 
     // CHECK data/valid stability under back-pressure
-    assert property (@(posedge clk) disable iff(!rst)
+    back_pressure_read: assert property (@(posedge clk) disable iff(!rst)
         (dma_read_chnl_valid && !dma_read_chnl_ready) |=> 
             (dma_read_chnl_valid && $stable(dma_read_chnl_data)))
     else $error("back-pressure READ not been handled correctly");
@@ -214,22 +214,22 @@ interface esp_acc_if;
     return (s==3'b000) || (s==3'b001) || (s==3'b010) || (s==3'b011);
     endfunction
 
-    assert property (@(posedge clk) disable iff(!rst)
+    write_ctrl_size: assert property (@(posedge clk) disable iff(!rst)
     (dma_write_ctrl_valid && dma_write_ctrl_ready) |-> size_ok(dma_write_ctrl_data_size))
     else $error("[WRITE CTRL] size out of codification");
 
-    assert property (@(posedge clk) disable iff(!rst)
+    read_ctrl_size: assert property (@(posedge clk) disable iff(!rst)
     (dma_read_ctrl_valid && dma_read_ctrl_ready) |-> size_ok(dma_read_ctrl_data_size))
     else $error("[READ CTRL] size out of codification");
 
-    assert property (@(posedge clk) disable iff(!rst)
+    ctrl_write_X_Z: assert property (@(posedge clk) disable iff(!rst)
     dma_write_ctrl_valid |-> !$isunknown({dma_write_ctrl_data_index,
                                             dma_write_ctrl_data_length,
                                             dma_write_ctrl_data_size,
                                             dma_write_ctrl_data_user}))
     else $error("[WRITE CTRL] X/Z in camps VALID=1");
 
-    assert property (@(posedge clk) disable iff(!rst)
+    ctrl_read_X_Z: assert property (@(posedge clk) disable iff(!rst)
     dma_read_ctrl_valid |-> !$isunknown({dma_read_ctrl_data_index,
                                         dma_read_ctrl_data_length,
                                         dma_read_ctrl_data_size,
@@ -237,11 +237,11 @@ interface esp_acc_if;
     else $error("[READ CTRL] X/Z in camps VALID=1");
 
 
-    assert property (@(posedge clk) disable iff(!rst)
+    data_write_X_Z: assert property (@(posedge clk) disable iff(!rst)
         dma_write_chnl_valid |-> !$isunknown(dma_write_chnl_data))
     else $error("[WRITE DATA] X/Z with VALID=1");
 
-    assert property (@(posedge clk) disable iff(!rst)
+    data_read_X_Z: assert property (@(posedge clk) disable iff(!rst)
         dma_read_chnl_valid |-> !$isunknown(dma_read_chnl_data))
     else $error("[READ DATA] X/Z with VALID=1");
 
